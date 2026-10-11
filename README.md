@@ -3,7 +3,7 @@
 A complete, self-healing private-network stack for macOS: encrypted, filtered
 DNS; a Cloudflare WARP tunnel that can never blackhole the machine; a menu-bar
 control panel; and a set of monitors and diagnostics that watch the network for
-probes, ARP spoofing and evil twins; ProtonVPN optional if WARP is not selected.
+probes, ARP spoofing and evil twins; ProtonVPN optional if WARP is deactivated.
 
 One installer sets up everything, **including its dependencies**.
 
