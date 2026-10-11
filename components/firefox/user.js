@@ -1,0 +1,24 @@
+// ── ECH (Encrypted Client Hello) ─────────────────────────────────────────
+user_pref("network.dns.echconfig.enabled", true);
+user_pref("network.dns.https.enabled", true);           // fetch HTTPS DNS records (needed for ECH keys)
+user_pref("network.dns.http3_echconfig.enabled", true); // ECH over HTTP/3
+
+// ── DNS over HTTPS (DoH) → AdGuard no-log/no-ECS ────────────────────────
+user_pref("network.trr.mode", 2);                       // 2 = prefer DoH, fallback to system DNS
+user_pref("network.trr.uri", "https://94.140.14.140/dns-query"); // AdGuard privacy server
+user_pref("network.trr.bootstrapAddress", "94.140.14.140");
+user_pref("doh-rollout.mode", 2);
+user_pref("doh-rollout.uri", "https://94.140.14.140/dns-query");
+user_pref("doh-rollout.self-enabled", true);
+
+// ── HTTPS-Only mode ───────────────────────────────────────────────────────
+user_pref("dom.security.https_only_mode", true);        // block plain HTTP upgrades
+
+// ── TLS hardening ─────────────────────────────────────────────────────────
+user_pref("security.tls.version.min", 3);               // TLS 1.2 minimum (3=TLS1.2, 4=TLS1.3)
+user_pref("security.ssl.require_safe_negotiation", true);
+user_pref("security.ssl.treat_unsafe_negotiation_as_broken", true);
+
+// ── OCSP stapling ────────────────────────────────────────────────────────
+user_pref("security.OCSP.require", true);
+user_pref("security.OCSP.enabled", 1);

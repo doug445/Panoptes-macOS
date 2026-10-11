@@ -1,0 +1,1680 @@
+#!/usr/bin/env bash
+
+# --- macOS 27 ARP-table workaround ------------------------------------------
+# A process forked by a non-Apple-signed binary (Homebrew bash) gets an EMPTY
+# ARP table. Read direct first so this still works when run by hand from zsh
+# and on unaffected machines; fall back to the cache published by the
+# com.netwatch.arpcache LaunchAgent. See components/macos27-netfix in macOS-SecureNetwork-Suite.
+ARP_CACHE="${HOME}/.local/share/netwatch/arp.cache"
+ARP_CACHE_MAX_AGE=120
+arp_stale_warned=0
+
+arp_table() {
+    local direct now mtime age
+    direct=$(arp -an 2>/dev/null || true)
+    if [[ -n "$direct" ]]; then
+        printf '%s\n' "$direct"
+        return 0
+    fi
+
+    [[ -r "$ARP_CACHE" ]] || {
+        if (( arp_stale_warned == 0 )); then
+            printf '%s\n' "warning: ARP table unreadable and no cache at $ARP_CACHE" >&2
+            printf '%s\n' "         run the suite installer (component: macos27-netfix)" >&2
+            arp_stale_warned=1
+        fi
+        return 0
+    }
+
+    # A stale cache is worse than none: it reports pre-change data and can mask
+    # the very thing these tools look for. Refuse it, and say so.
+    now=$(date +%s)
+    mtime=$(stat -f %m "$ARP_CACHE" 2>/dev/null || echo 0)
+    age=$(( now - mtime ))
+    if (( age > ARP_CACHE_MAX_AGE )); then
+        if (( arp_stale_warned == 0 )); then
+            printf '%s\n' "warning: ARP cache is ${age}s stale — results incomplete" >&2
+            arp_stale_warned=1
+        fi
+        return 0
+    fi
+
+    arp_stale_warned=0
+    cat "$ARP_CACHE" 2>/dev/null || true
+}
+
+# Resolve one MAC from the table (replaces `arp -n "$ip" | awk ...`).
+arp_mac_for_ip() {
+    local ip="$1"
+    arp_table | awk -v want="($ip)" '
+        $2 == want {
+            for (i = 1; i <= NF; i++)
+                if ($i ~ /^[0-9a-f][0-9a-f]?(:[0-9a-f][0-9a-f]?){5}$/) { print $i; exit }
+        }
+    ' || true
+}
+# --- end ARP-table workaround -----------------------------------------------
+
+# probesource (macOS port) — interactively investigate the source of a firewall
+# drop, recent probe, or active connection. Pick a target from menu sources
+# (pf / unified-log firewall history, netwatch log, live connections, manual
+# entry), then run a single tactic, a single-pass full sweep, or a relentless
+# escalating sweep.
+#
+# Passive tactics: whois, rDNS, GeoIP, unified-log + firewall history,
+# arp/ndp neighbour + OUI vendor, live connections (lsof/netstat), pf state
+# table, pf table membership, brief tcpdump/tshark capture, p0f fingerprint.
+# Active tactics:  icmp ping, traceroute/mtr, nmap quick/full/UDP/OS/vuln/banner,
+# arp-scan (LAN), nping probe storm, masscan full-port sweep, sslscan, SMB/NBT
+# enum, SNMP (onesixtyone), IKE/IPsec (ike-scan), hping3 stealth/flood scans.
+#
+# Platform notes (differences from the Linux original):
+#   * Requires bash >= 4 — macOS ships 3.2, so this re-execs under Homebrew bash.
+#   * Uses a GNU userland shim (Homebrew grep/gnu-sed/coreutils/gawk on PATH) so
+#     the pervasive `grep -oP`, `sed …\s…`, `stat -c`, `timeout`, gawk IGNORECASE
+#     all behave as on Linux. These are auto-installed at startup if missing.
+#   * Linux `ip/ss/journalctl/conntrack/ipset/UFW` → macOS `route/arp/ndp/lsof/
+#     netstat/log show/pfctl`. Captures target the primary interface, not `any`.
+#   * Package manager is Homebrew (never run as root). Some tools (nbtscan,
+#     onesixtyone, hping3) have no brew formula and are gated/skipped cleanly.
+#
+# Most tactics escalate via sudo (cached at startup); brew installs run as you.
+
+# ── bash >= 4 guard (macOS /bin/bash is 3.2; re-exec under a modern bash) ─────
+if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+    for _b in /opt/homebrew/bin/bash /usr/local/bin/bash "$(command -v bash 2>/dev/null)"; do
+        [ -n "$_b" ] && [ -x "$_b" ] && "$_b" -c '[ "${BASH_VERSINFO[0]}" -ge 4 ]' 2>/dev/null \
+            && exec "$_b" "$0" "$@"
+    done
+    echo "probesource needs bash >= 4. Install it with:  brew install bash" >&2
+    exit 1
+fi
+
+# ── GNU userland shim (put Homebrew gnubin dirs first on PATH) ────────────────
+# grep (PCRE -P), gnu-sed (\s), coreutils (stat -c / timeout / date), gawk
+# (IGNORECASE). Nonexistent dirs are harmless; ensure_gnu_userland installs the
+# backing formulae if they're missing, and they then resolve via these paths.
+BREW_PREFIX="${HOMEBREW_PREFIX:-}"
+[ -z "$BREW_PREFIX" ] && BREW_PREFIX="$(command -v brew >/dev/null 2>&1 && brew --prefix 2>/dev/null)"
+[ -z "$BREW_PREFIX" ] && { [ -d /opt/homebrew ] && BREW_PREFIX=/opt/homebrew || BREW_PREFIX=/usr/local; }
+for _gb in grep gnu-sed coreutils gawk findutils; do
+    _d="$BREW_PREFIX/opt/$_gb/libexec/gnubin"
+    case ":$PATH:" in *":$_d:"*) ;; *) PATH="$_d:$PATH" ;; esac
+done
+case ":$PATH:" in *":$BREW_PREFIX/bin:"*) ;; *) PATH="$BREW_PREFIX/bin:$PATH" ;; esac
+export PATH
+
+set -uo pipefail
+
+# ── paths / setup ────────────────────────────────────────────────────────────
+LOG_DIR="${HOME}/.local/share/probesource"
+NW_LOG="${HOME}/.local/share/netwatch/events.log"
+# OUI vendor lookup files (multiple formats; checked in order). macOS has no
+# system IEEE oui.txt, so the downloaded cache and the arp-scan/nmap databases
+# (shipped by the Homebrew formulae) are what make vendor lookup work here.
+OUI_CACHE="${HOME}/.local/share/probesource/oui-fresh.txt"
+OUI=/nonexistent/oui.txt   # macOS ships no system IEEE file; cache/db cover it
+OUI_ARPSCAN="$BREW_PREFIX/share/arp-scan/ieee-oui.txt"
+[[ -r "$OUI_ARPSCAN" ]] || OUI_ARPSCAN="$BREW_PREFIX/opt/arp-scan/share/arp-scan/ieee-oui.txt"
+OUI_NMAP="$BREW_PREFIX/share/nmap/nmap-mac-prefixes"
+mkdir -p "$LOG_DIR"
+
+# Per-target session log (set in main loop) and rolling master log.
+SESSION_LOG=""
+MASTER_LOG="${LOG_DIR}/master.log"
+STATE_DIR="${LOG_DIR}/state"
+touch "$MASTER_LOG"
+mkdir -p "$STATE_DIR"
+
+UI=dialog
+command -v dialog >/dev/null || UI=whiptail
+command -v "$UI" >/dev/null || UI=dialog   # dialog is the brew target below
+
+# ── UI wrapper (fd-layout-agnostic dialog invocation) ─────────────────────────
+# The Linux original captured widget results with the classic `3>&1 1>&2 2>&3`
+# swap, which assumes dialog draws its curses screen on stdout and prints the
+# result on stderr. Homebrew's macOS `dialog` draws the screen on a different fd,
+# so that swap leaked raw screen escape sequences into $(...) captures — the
+# selected value came back as a garbage blob (broken IPs, unusable log
+# filenames). This wrapper is layout-agnostic: it forces the screen AND keyboard
+# to the real terminal (/dev/tty) and routes ONLY the widget's result string to
+# our stdout via dialog's --output-fd, so captures stay clean whether or not the
+# call sits inside a command substitution. The exit code (used by --yesno) is
+# preserved. All widget calls go through `ui`; $UI is kept only for the
+# tailbox-vs-textbox capability check and the dependency list.
+ui() {
+    if [[ "$UI" == dialog ]]; then
+        dialog --output-fd 3 "$@" 3>&1 1>/dev/tty 2>/dev/tty </dev/tty
+    else
+        # whiptail: result on stderr, screen on stdout — force the screen to the
+        # terminal and hand the result back on our stdout.
+        "$UI" "$@" 3>&1 1>/dev/tty 2>&3 3>&- </dev/tty
+    fi
+}
+
+# ── platform: primary interface for captures / arp-scan ──────────────────────
+primary_if() {
+    local dev
+    dev=$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')
+    [[ -z "$dev" ]] && dev=$(route -n get -inet6 default 2>/dev/null | awk '/interface:/{print $2; exit}')
+    [[ -z "$dev" ]] && dev=en0
+    echo "$dev"
+}
+PRIMARY_IF="$(primary_if)"
+CAP_IF="$PRIMARY_IF"   # macOS tcpdump/tshark/p0f have no "any" pseudo-interface
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ── dependency management (Homebrew) ─────────────────────────────────────────
+# macOS has one package manager for our purposes: Homebrew. It must never run as
+# root, so installs go through `brew` directly (no sudo), unlike the privileged
+# runtime tactics which use `sudo -n`.
+PM=none
+detect_pm() { have brew && PM=brew || PM=none; }
+
+# command → Homebrew formula. Empty value = provided by the base system (whois,
+# dig, tcpdump, traceroute, curl), covered by a runtime fallback (geoiplookup →
+# Team Cymru DNS), or simply not packaged by Homebrew (nbtscan, onesixtyone,
+# hping3) — those are gated and skipped cleanly. enum4linux-ng is handled via
+# pipx. grep/gsed/gstat/gawk back the GNU userland shim.
+declare -A DEP_PKG=(
+    [whois]=""
+    [dig]=""
+    [geoiplookup]=""
+    [tcpdump]=""
+    [tshark]="wireshark"
+    [p0f]="p0f"
+    [mtr]="mtr"
+    [traceroute]=""
+    [nmap]="nmap"
+    [nping]="nmap"
+    [arp-scan]="arp-scan"
+    [nbtscan]=""
+    [smbclient]="samba"
+    [onesixtyone]=""
+    [ike-scan]="ike-scan"
+    [sslscan]="sslscan"
+    [masscan]="masscan"
+    [hping3]=""
+    [dialog]="dialog"
+    [curl]=""
+    [pipx]="pipx"
+    [grep]="grep"
+    [gsed]="gnu-sed"
+    [gstat]="coreutils"
+    [gawk]="gawk"
+)
+
+# Echo the Homebrew formula backing a command (empty if none / base-system).
+dep_pkg_for() {
+    local cmd="$1"
+    echo "${DEP_PKG[$cmd]:-}"
+}
+
+# Human-readable install hint for a list of commands (for skip messages).
+dep_hint() {
+    local c p out=()
+    for c in "$@"; do
+        p=$(dep_pkg_for "$c")
+        [[ -n "$p" ]] && out+=("$p") || out+=("$c")
+    done
+    echo "brew install ${out[*]}"
+}
+
+# Make sure we hold a usable sudo credential before a privileged step.
+# Order: reuse a cached/passwordless grant; else prompt when we have a terminal;
+# else (truly unattended) fail fast rather than hang on an unseen prompt.
+ensure_sudo() {
+    sudo -n true 2>/dev/null && return 0
+    [[ -t 0 || -t 1 ]] && { sudo -v; return; }
+    return 1
+}
+
+# Is `grep`/`sed` on PATH the GNU build (needed for -P and \s)? BSD sed has no
+# --version and errors out, which is exactly the signal we want.
+gnu_grep_ok() { grep --version 2>/dev/null | grep -qi 'gnu grep'; }
+gnu_sed_ok()  { sed  --version 2>/dev/null | grep -qi 'gnu sed'; }
+
+# Ensure the GNU userland the script's text-processing depends on. Installs any
+# missing backing formula via Homebrew; the gnubin dirs are already first on
+# PATH, so freshly-installed tools resolve immediately. Best-effort and silent-ish.
+ensure_gnu_userland() {
+    [[ "$PM" == brew ]] || return 0
+    local want=()
+    gnu_grep_ok            || want+=(grep)
+    gnu_sed_ok             || want+=(gnu-sed)
+    have gstat             || want+=(coreutils)
+    have gawk              || want+=(gawk)
+    (( ${#want[@]} == 0 )) && return 0
+    ui --infobox "Installing GNU userland (${want[*]}) via Homebrew…\nNeeded for probesource's log parsing." 6 66 2>/dev/null || \
+        echo "Installing GNU userland: ${want[*]}" >&2
+    brew install "${want[@]}" >"$LOG_DIR/gnu-install.log" 2>&1 || true
+}
+
+# Best-effort install of the formulae backing the given missing commands.
+# brew runs as the normal user (never root). enum4linux-ng → pipx from upstream
+# git (not on PyPI / Homebrew).
+install_for_cmds() {
+    local c pkg fmla=() want_e4l=0
+    for c in "$@"; do
+        if [[ "$c" == enum4linux-ng ]]; then want_e4l=1; continue; fi
+        pkg=$(dep_pkg_for "$c"); [[ -z "$pkg" ]] && continue
+        fmla+=("$pkg")
+    done
+    if ((${#fmla[@]})); then
+        # dedupe (nmap backs both nmap and nping, etc.)
+        local -a uniq=()
+        mapfile -t uniq < <(printf '%s\n' "${fmla[@]}" | awk '!seen[$0]++')
+        brew install "${uniq[@]}"
+    fi
+    if (( want_e4l )); then
+        have pipx || brew install pipx
+        if have pipx; then
+            pipx install "git+https://github.com/cddmp/enum4linux-ng.git" >/dev/null 2>&1
+            pipx ensurepath >/dev/null 2>&1 || true
+        fi
+    fi
+    return 0
+}
+
+# Every command any tactic might need, deduped — drives the batch installer.
+needed_cmds() {
+    local t c
+    for t in "${TACTICS[@]}"; do
+        c=$(echo "$t" | awk -F'|' '{print $5}')
+        [[ -n "$c" ]] && echo "$c"
+    done
+    # geoip/trace fallbacks worth having even though their tactics are ungated.
+    printf '%s\n' dig mtr geoiplookup
+    echo "$UI"
+    echo curl
+}
+
+# Echo the subset of needed_cmds that are not currently installed.
+missing_cmds() {
+    local c seen=" "
+    while read -r c; do
+        [[ "$seen" == *" $c "* ]] && continue
+        seen+="$c "
+        have "$c" || echo "$c"
+    done < <(needed_cmds)
+}
+
+# Interactive batch check+install, offered at startup and from the main menu.
+check_and_install_deps() {
+    detect_pm
+    local -a miss; mapfile -t miss < <(missing_cmds)
+    if (( ${#miss[@]} == 0 )); then
+        info "All probe tools are installed.\nPackage manager: Homebrew."
+        return 0
+    fi
+    if [[ "$PM" == none ]]; then
+        info "Missing tools:\n  ${miss[*]}\n\nHomebrew not found — install it from https://brew.sh then re-run."
+        return 0
+    fi
+    # Split into brew-installable vs no-formula (manual/skip).
+    local -a inst=() manual=()
+    local c
+    for c in "${miss[@]}"; do
+        if [[ -n "$(dep_pkg_for "$c")" || "$c" == enum4linux-ng ]]; then
+            inst+=("$c")
+        else
+            manual+=("$c")
+        fi
+    done
+    local msg="Missing ${#miss[@]} probe tool(s):\n\n  ${miss[*]}\n"
+    (( ${#manual[@]} )) && msg+="\nNo Homebrew formula (skip / build yourself):\n  ${manual[*]}\n"
+    if (( ${#inst[@]} == 0 )); then
+        info "$msg"
+        return 0
+    fi
+    local hint; hint=$(dep_hint "${inst[@]}")
+    ui --yesno "${msg}\nInstall the ${#inst[@]} available via Homebrew?\n( ${hint} )" 18 78 || return 0
+    ui --infobox "brew installing ${#inst[@]} formula(e)…\nThis can take a few minutes." 6 60
+    install_for_cmds "${inst[@]}" >"$LOG_DIR/dep-install.log" 2>&1 || true
+    local -a still; mapfile -t still < <(missing_cmds)
+    if (( ${#still[@]} == 0 )); then
+        info "All dependencies installed."
+    else
+        info "Installed what Homebrew had. Still missing:\n  ${still[*]}\n\n(nbtscan / onesixtyone / hping3 have no brew formula.)\nLog: $LOG_DIR/dep-install.log"
+    fi
+}
+
+die() { ui --msgbox "$*" 8 60; exit 1; }
+
+info() { ui --msgbox "$*" 10 70; }
+
+# Append a labelled section to the active session log AND mirror to master.
+log_section() {
+    local title="$1"; shift
+    {
+        echo
+        echo "════════════════════════════════════════════════════════════"
+        echo "  $title   ($(date '+%Y-%m-%d %H:%M:%S'))"
+        echo "════════════════════════════════════════════════════════════"
+        "$@" 2>&1
+    } | tee -a "$SESSION_LOG" >> "$MASTER_LOG"
+}
+
+# Heuristic: is the IP on a directly-connected LAN? (used to gate ARP tactics)
+# macOS: an on-link host has an arp/ndp entry, else fall back to testing the
+# target against our directly-connected IPv4 subnets. We deliberately avoid
+# `route get` here: with a VPN up (WARP/utun) it can dump the entire routing
+# table, misclassifying WAN hosts (e.g. 1.1.1.1) as LAN.
+is_lan() {
+    local ip="$1"
+    # IPv6 link-local is always directly on-link.
+    [[ "$ip" == fe80:* ]] && return 0
+    if [[ "$ip" == *:* ]]; then
+        # IPv6: an existing ndp neighbour entry means on-link; otherwise treat
+        # as routed/WAN (no local prefix math attempted for v6).
+        ndp -an 2>/dev/null | awk '{print $1}' | grep -q "^${ip}\$" && return 0
+        return 1
+    fi
+    # IPv4 fast path: a resolved arp entry ("... at <mac> on <if>") is on-link.
+    [[ -n "$(arp_mac_for_ip "$ip")" ]] && return 0
+    # Native fast path: scutil reports "Directly Reachable Address" only for
+    # on-link hosts (VPN-independent). Positive-only — a plain "Reachable" can be
+    # either routed or VPN, so fall through to the subnet test on anything else.
+    if have scutil; then
+        scutil -r "$ip" 2>/dev/null | grep -q 'Directly Reachable' && return 0
+    fi
+    # Subnet-membership test: for each directly-connected IPv4 subnet from
+    # ifconfig (inet <addr> netmask 0x........), compute network = addr & mask
+    # and test whether the target's 32-bit int falls inside it. VPN-independent.
+    ifconfig 2>/dev/null | gawk -v ip="$ip" '
+        function toint(a,  p){ split(a,p,"."); return ((p[1]*256+p[2])*256+p[3])*256+p[4] }
+        BEGIN { tgt=toint(ip) }
+        { addr=""; mask=""
+          for (i=1;i<=NF;i++){ if($i=="inet")addr=$(i+1); if($i=="netmask")mask=$(i+1) }
+          if (addr!="" && mask ~ /^0x/){ m=strtonum(mask); if(and(toint(addr),m)==and(tgt,m)) f=1 }
+        }
+        END { exit f?0:1 }' && return 0
+    return 1
+}
+
+# Validate a string looks like a v4 or v6 address. Strips [brackets] if any.
+valid_ip() {
+    local s="${1#[}"; s="${s%]}"
+    [[ "$s" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && return 0
+    [[ "$s" =~ ^[0-9a-fA-F:]+$ && "$s" == *:* ]] && return 0
+    return 1
+}
+# Echo the address with brackets stripped (caller should use this normalized form).
+norm_ip() { local s="${1#[}"; echo "${s%]}"; }
+valid_ipv4() { [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; }
+valid_ipv6() { local s; s=$(norm_ip "$1"); [[ "$s" =~ ^[0-9a-fA-F:]+$ && "$s" == *:* ]]; }
+
+# Zero-pad each octet of a MAC to two hex digits (macOS arp/ndp drop leading
+# zeros, e.g. "de:4:f1:db:d1:d9" → "de:04:f1:db:d1:d9") so OUI prefixing works.
+normalize_mac() {
+    local m="$1" o out=() parts
+    IFS=: read -ra parts <<<"$m"
+    (( ${#parts[@]} == 0 )) && { echo "$m"; return; }
+    for o in "${parts[@]}"; do
+        [[ "$o" =~ ^[0-9a-fA-F]{1,2}$ ]] || { echo "$m"; return; }
+        out+=("$(printf '%02x' "0x$o")")
+    done
+    local IFS=:; echo "${out[*]}"
+}
+
+# ── target sources ───────────────────────────────────────────────────────────
+
+# Top-N drop sources from netwatch events.log (DROP lines, src=IP).
+src_top_drops() {
+    [[ -r "$NW_LOG" ]] || { echo ""; return; }
+    grep DROP "$NW_LOG" 2>/dev/null \
+        | awk -F'src=' 'NF>1{print $2}' | awk '{print $1}' \
+        | sort | uniq -c | sort -rn | head -15
+}
+
+# Last 15 unique sources from macOS firewall history (last hour). No journald on
+# macOS: pull denied/blocked lines from the unified log and, if present, the
+# application-firewall log, then extract candidate source IPs. Best-effort —
+# many Macs log nothing here unless pf/appfirewall logging is enabled.
+src_recent_firewall() {
+    {
+        sudo -n log show --last 1h --style syslog 2>/dev/null \
+            | grep -iE 'deny|block|drop' 2>/dev/null
+        [[ -r /var/log/appfirewall.log ]] && grep -iE 'deny|block' /var/log/appfirewall.log 2>/dev/null
+    } \
+        | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}|([0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{1,4}' \
+        | grep -vE '^(255\.|224\.|0\.0\.0\.0|127\.|::1$|fe80|ff02)' \
+        | awk '!seen[$0]++' | head -15
+}
+
+# Active connections (foreign peers), excluding loopback/private listeners.
+# macOS has no `ss`; lsof gives full (untruncated) foreign addresses via "->".
+src_active() {
+    lsof -nP -i 2>/dev/null \
+        | grep -oE -e '->\[?[0-9a-fA-F:.]+\]?:[0-9]+' \
+        | sed -E 's/^->//; s/^\[//' \
+        | awk '{
+            t=$0
+            if (t ~ /\]:/) { sub(/\]:[0-9]+$/, "", t) }   # [ipv6]:port
+            else           { sub(/:[0-9]+$/,   "", t) }   # ipv4:port
+            print t
+        }' \
+        | grep -vE '^(127\.|::1|0\.0\.0\.0|\*|$)' \
+        | sort -u | head -20
+}
+
+# Build a dialog --menu of candidates. Echoes the chosen IP on stdout.
+pick_from_list() {
+    local title="$1"; shift
+    local -a items=()
+    local i=1
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        items+=("$i" "$line")
+        ((i++))
+    done
+    if (( ${#items[@]} == 0 )); then
+        info "No entries available for: $title"
+        return 1
+    fi
+    local choice
+    choice=$(ui --menu "$title" 22 78 15 "${items[@]}") || return 1
+    # Pull the first IP-looking token out of the chosen line.
+    local line="${items[$((choice*2 - 1))]}"
+    echo "$line" | grep -oE '[0-9a-fA-F:.]+' \
+        | awk '/^[0-9]{1,3}(\.[0-9]{1,3}){3}$/ || /:.*:/' | head -1
+}
+
+choose_target() {
+    while true; do
+        local mode
+        mode=$(ui --cancel-label "Back" --menu "Choose target source" 19 70 10 \
+            T  "Top drop sources (netwatch log)"                \
+            F  "Recent firewall drops (pf / unified log, 1h)"   \
+            A  "Active connections (lsof)"                      \
+            M  "Manual entry — auto-detect v4 or v6"            \
+            4  "Manual entry — IPv4 only"                       \
+            6  "Manual entry — IPv6 only"                       \
+            B  "Back to main menu"                              \
+            Q  "Quit probesource"                               \
+           ) || return 1
+        local ip=""
+        case "$mode" in
+            T) ip=$(src_top_drops       | pick_from_list "Top drop sources") ;;
+            F) ip=$(src_recent_firewall | pick_from_list "Recent firewall drops") ;;
+            A) ip=$(src_active          | pick_from_list "Active connections") ;;
+            M) ip=$(ui --cancel-label "Back" --inputbox \
+                    "Enter target IP (v4 or v6, brackets OK for v6):" \
+                    8 60) || continue
+               ip=$(norm_ip "$ip") ;;
+            4) ip=$(ui --cancel-label "Back" --inputbox \
+                    "Enter IPv4 address (e.g. 192.168.0.138):" \
+                    8 50) || continue
+               if ! valid_ipv4 "$ip"; then
+                   info "Not a valid IPv4 address: '$ip'"; continue
+               fi ;;
+            6) ip=$(ui --cancel-label "Back" --inputbox \
+                    "Enter IPv6 address (e.g. 2606:4700:4700::1111, brackets OK):" \
+                    8 70) || continue
+               ip=$(norm_ip "$ip")
+               if ! valid_ipv6 "$ip"; then
+                   info "Not a valid IPv6 address: '$ip'"; continue
+               fi ;;
+            B) return 1 ;;
+            Q) return 2 ;;   # signal investigate() to quit the whole tool
+        esac
+        [[ -z "$ip" ]] && continue
+        if ! valid_ip "$ip"; then
+            info "Not a valid IP: '$ip'"
+            continue
+        fi
+        echo "$ip"
+        return 0
+    done
+}
+
+# ── tactics ──────────────────────────────────────────────────────────────────
+# Each tactic takes the target IP as $1 and writes its output via log_section.
+
+t_whois()    { log_section "WHOIS"               whois "$1"; }
+t_rdns()     { log_section "REVERSE DNS"         dig +short -x "$1"; }
+t_geoip() {
+    if have geoiplookup; then
+        log_section "GEOIP" geoiplookup "$1"
+    else
+        log_section "GEOIP (Team Cymru DNS)" bash -c "
+            ip='$1'
+            if [[ \$ip == *:* ]]; then echo 'IPv6 cymru lookup not implemented'; exit; fi
+            rev=\$(echo \$ip | awk -F. '{print \$4\".\"\$3\".\"\$2\".\"\$1}')
+            dig +short \"\${rev}.origin.asn.cymru.com\" TXT
+        "
+    fi
+}
+t_journal() {
+    # macOS has no journalctl; the nearest history is the unified log plus the
+    # application-firewall log. This can be slow — scoped to 24h and the target.
+    log_section "FIREWALL / UNIFIED-LOG HISTORY (24h, host $1)" bash -c "
+        sudo -n log show --last 24h --style syslog 2>/dev/null | grep -F '$1' | tail -50
+        [[ -r /var/log/appfirewall.log ]] && grep -F '$1' /var/log/appfirewall.log | tail -20
+        true
+    "
+}
+t_netwatch() {
+    log_section "NETWATCH HISTORY" bash -c "
+        [[ -r '$NW_LOG' ]] && grep -F '$1' '$NW_LOG' | tail -50 || echo 'no netwatch log'
+    "
+}
+# Resolve a MAC to a vendor name, cascading across every OUI source we know.
+# Order: fresh downloaded cache → IEEE oui.txt (absent on macOS) → arp-scan db →
+# nmap db. The arp-scan/nmap databases ship with their Homebrew formulae, so the
+# cache + those fallbacks are what make this work on macOS.
+oui_vendor() {
+    local raw="$1" mac prefix vendor=""
+    mac=$(normalize_mac "$raw")
+    prefix=$(echo "${mac:0:8}" | tr -d : | tr 'a-f' 'A-F')
+    [[ -r "$OUI_CACHE" ]] && vendor=$(grep "^$prefix" "$OUI_CACHE" 2>/dev/null | head -1 \
+        | sed -E 's/^[0-9A-F]+\s+\(base 16\)\s+//' | tr -d '\r')
+    [[ -z "$vendor" && -r "$OUI" ]] && vendor=$(grep "^$prefix" "$OUI" 2>/dev/null | head -1 \
+        | sed -E 's/^[0-9A-F]+\s+\(base 16\)\s+//' | tr -d '\r')
+    [[ -z "$vendor" && -r "$OUI_ARPSCAN" ]] && vendor=$(grep -i "^$prefix"$'\t' "$OUI_ARPSCAN" 2>/dev/null | head -1 \
+        | cut -f2- | tr -d '\r')
+    [[ -z "$vendor" && -r "$OUI_NMAP" ]] && vendor=$(grep -i "^$prefix " "$OUI_NMAP" 2>/dev/null | head -1 \
+        | sed -E "s/^$prefix\s+//I" | tr -d '\r')
+    [[ -z "$vendor" ]] && vendor="unknown (prefix $prefix not in local OUI db)"
+    echo "$vendor"
+}
+
+_t_neigh_body() {
+    local ip="$1" mac=""
+    if [[ "$ip" == *:* ]]; then
+        ndp -an 2>/dev/null | awk -v ip="$ip" '$1==ip'
+        mac=$(ndp -an 2>/dev/null | awk -v ip="$ip" '$1==ip{print $2; exit}')
+    else
+        arp_table | grep -F "($ip)" || true
+        mac=$(arp_mac_for_ip "$ip")
+    fi
+    [[ -n "$mac" && "$mac" != "(incomplete)" ]] || return 0
+    echo
+    echo "OUI vendor:"
+    oui_vendor "$mac"
+}
+t_neigh() { log_section "ARP / NDP / OUI vendor" _t_neigh_body "$1"; }
+t_connstate() {
+    log_section "LIVE CONNECTIONS (lsof/netstat)" bash -c "
+        lsof -nP -i 2>/dev/null | grep -F '$1' \
+            || netstat -an 2>/dev/null | grep -F '$1' \
+            || echo 'no live conns'
+    "
+}
+
+t_pcap() {
+    local secs="${2:-10}"
+    log_section "TCPDUMP (${secs}s capture, if=${CAP_IF})" \
+        sudo -n timeout "$secs" tcpdump -nn -i "$CAP_IF" -c 200 host "$1"
+}
+
+t_ping() {
+    if [[ "$1" == *:* ]]; then
+        log_section "ICMP PING6 (4)" ping6 -c 4 "$1"
+    else
+        log_section "ICMP PING (4)" ping -c 4 -t 8 "$1"
+    fi
+}
+
+t_trace() {
+    if have mtr; then
+        log_section "MTR (10 cycles)" sudo -n mtr -n -c 10 -r "$1"
+    elif [[ "$1" == *:* ]]; then
+        log_section "TRACEROUTE6" traceroute6 -n "$1"
+    else
+        log_section "TRACEROUTE" traceroute -n "$1"
+    fi
+}
+
+t_nmap_quick() {
+    log_section "NMAP quick (-F -sV --reason)" \
+        sudo -n nmap -Pn -F -sV --reason --open -T4 "$1"
+}
+t_nmap_full() {
+    log_section "NMAP full (-A -p- -T4)" \
+        sudo -n nmap -Pn -A -p- --reason --open -T4 "$1"
+}
+t_nmap_udp() {
+    log_section "NMAP UDP top-100" \
+        sudo -n nmap -Pn -sU --top-ports 100 --reason -T4 "$1"
+}
+t_nmap_os() {
+    log_section "NMAP OS fingerprint" \
+        sudo -n nmap -Pn -O --osscan-guess --max-os-tries 2 "$1"
+}
+t_nmap_vuln() {
+    log_section "NMAP vuln NSE" \
+        sudo -n nmap -Pn -sV --script vuln --script-timeout 60s "$1"
+}
+t_nmap_banner() {
+    log_section "NMAP banner grab" \
+        sudo -n nmap -Pn -sV --script banner --script-args=banner.timeout=5s "$1"
+}
+t_arpscan() {
+    if is_lan "$1"; then
+        log_section "ARP-SCAN (single host, if=${PRIMARY_IF})" \
+            sudo -n arp-scan --interface="$PRIMARY_IF" --localnet --destaddr="$1" --retry=3
+    else
+        log_section "ARP-SCAN (skipped — not LAN)" echo "$1 routes via gateway"
+    fi
+}
+t_nping_storm() {
+    # One round of ICMP + TCP-SYN to common ports + UDP. Caller controls intensity.
+    local rate="${2:-50}" count="${3:-10}"
+    log_section "NPING storm (rate=${rate}pps count=${count})" bash -c "
+        sudo -n nping --icmp -c $count --rate $rate '$1' 2>&1 | tail -20
+        echo
+        sudo -n nping --tcp -p 22,80,443,3389,445,8080 --flags syn -c $count --rate $rate '$1' 2>&1 | tail -20
+        echo
+        sudo -n nping --udp -p 53,123,161,500,1900 -c $count --rate $rate '$1' 2>&1 | tail -20
+    "
+}
+
+# ── added passive tactics ────────────────────────────────────────────────────
+# macOS uses pf instead of Linux conntrack/ipset.
+t_conntrack() {
+    log_section "PF STATE TABLE" bash -c "
+        sudo -n pfctl -s states 2>/dev/null | grep -F '$1' | head -50 \
+            || echo 'no matching pf state entries (pf off, or none match)'
+    "
+}
+t_ipset() {
+    log_section "PF TABLE membership" bash -c "
+        tables=\$(sudo -n pfctl -s Tables 2>/dev/null)
+        if [[ -z \"\$tables\" ]]; then echo 'no pf tables defined'; exit; fi
+        hit=0
+        for tbl in \$tables; do
+            if sudo -n pfctl -t \"\$tbl\" -T test '$1' >/dev/null 2>&1; then
+                echo \"in table: \$tbl\"; hit=1
+            fi
+        done
+        (( hit )) || echo \"not a member of any pf table (\$(echo \$tables | wc -w) checked)\"
+    "
+}
+t_p0f() {
+    # p0f is passive — listens on the wire for traffic from the host.
+    local secs="${2:-15}"
+    log_section "p0f passive fingerprint (${secs}s, if=${CAP_IF})" bash -c "
+        out=\$(mktemp)
+        sudo -n timeout $secs p0f -i \"$CAP_IF\" -o \"\$out\" \"host $1\" >/dev/null 2>&1
+        grep -F '$1' \"\$out\" | head -40
+        rm -f \"\$out\"
+    "
+}
+t_tshark() {
+    local secs="${2:-10}"
+    log_section "TSHARK decode (${secs}s, if=${CAP_IF})" \
+        sudo -n timeout "$secs" tshark -i "$CAP_IF" -n -Q -c 100 \
+            -f "host $1" -Y "ip or ipv6" \
+            -T fields -e frame.time_relative -e ip.src -e ip.dst \
+            -e _ws.col.Protocol -e _ws.col.Info
+}
+
+# ── macOS-native passive tactics (no Linux equivalent) ───────────────────────
+# Native reachability + resolver-cache identity. `scutil -r` gives a fast,
+# VPN-independent on-link/routed verdict; `dscacheutil` surfaces any hostname the
+# system resolver already cached for the target.
+t_reach() {
+    log_section "REACHABILITY (scutil) + resolver cache (dscacheutil)" bash -c "
+        echo '── scutil reachability ──'
+        scutil -r '$1' 2>/dev/null || echo 'unknown'
+        echo
+        echo '── dscacheutil (cached host record) ──'
+        dscacheutil -q host -a ip_address '$1' 2>/dev/null | grep -v '^\$' | head -12 \
+            || echo 'nothing cached'
+    "
+}
+
+# Bonjour/mDNS active discovery (LAN only). dns-sd is the native macOS mDNS
+# client (Linux uses avahi). Browses the service types advertised on-link and
+# attempts a reverse-mDNS PTR for the target — richer than scraping captures.
+t_bonjour() {
+    if ! is_lan "$1"; then
+        log_section "BONJOUR/mDNS (skipped — not LAN)" \
+            echo "$1 is routed; mDNS is link-local only"
+        return
+    fi
+    local secs=6
+    log_section "BONJOUR/mDNS discovery (${secs}s)" bash -c "
+        echo '── service types advertised on-link ──'
+        timeout $secs dns-sd -B _services._dns-sd._udp local. 2>/dev/null \
+            | awk 'NR>4 && \$0 ~ /_/ {print \$(NF-1), \$NF}' | sort -u | head -30
+        echo
+        echo '── reverse mDNS (PTR) for target ──'
+        rev=\$(echo '$1' | awk -F. '{print \$4\".\"\$3\".\"\$2\".\"\$1}')
+        timeout $secs dns-sd -Q \"\${rev}.in-addr.arpa.\" PTR 2>/dev/null \
+            | awk 'NR>2 {print}' | head -8 || echo '(no reverse mDNS record)'
+    "
+}
+
+# Process-attributed packet capture — macOS pktap tags every packet with the
+# LOCAL process that owns it (Linux tcpdump cannot). Reveals which app on this
+# Mac is exchanging traffic with the target. -k P adds the process column.
+t_ppcap() {
+    local secs="${2:-10}"
+    log_section "PKTAP process-attributed capture (${secs}s)" \
+        sudo -n timeout "$secs" tcpdump -n -k P -i 'pktap,all' -c 200 host "$1"
+}
+
+# Live pf firewall decisions for the target — the macOS analog of watching
+# kernel/UFW drops, with the matching rule. Requires pf rules to carry `log`
+# (pflog0 exists only when pf is logging); skips cleanly otherwise.
+t_pflog() {
+    local secs="${2:-10}"
+    log_section "PF LOG live capture (${secs}s, pflog0)" bash -c "
+        if ! ifconfig pflog0 >/dev/null 2>&1; then
+            echo 'pflog0 not present — pf logging not enabled (add \`log\` to pf rules).'
+            exit 0
+        fi
+        sudo -n timeout $secs tcpdump -n -e -ttt -i pflog0 host '$1' 2>&1 | head -60 \
+            || echo 'no pf-log entries for target in window'
+    "
+}
+
+# pf rules that reference the target (pfctl -s rules). Complements the pf state
+# and pf table tactics with the ruleset context deciding this host's fate.
+t_pfrules() {
+    log_section "PF RULES referencing target" bash -c "
+        rules=\$(sudo -n pfctl -s rules 2>/dev/null)
+        if [[ -z \"\$rules\" ]]; then echo 'no pf ruleset readable (pf off?)'; exit 0; fi
+        hits=\$(echo \"\$rules\" | grep -F '$1')
+        if [[ -n \"\$hits\" ]]; then echo \"\$hits\"; else
+            echo 'no rule names the target explicitly — default policy applies:'
+            echo \"\$rules\" | grep -E '^(block|pass) ' | head -8
+        fi
+    "
+}
+
+# Per-process live connection snapshot (macOS nettop). Attributes any live
+# socket to the target back to the owning local process, with byte counters —
+# a one-shot sample (-l 1), no DNS (-n).
+t_nettop() {
+    log_section "NETTOP per-process snapshot" bash -c "
+        sudo -n nettop -P -n -x -l 1 2>/dev/null | grep -F '$1' | head -20 \
+            || echo 'no live sockets to target (or nettop unavailable)'
+    "
+}
+
+# ── added active tactics ─────────────────────────────────────────────────────
+t_masscan() {
+    log_section "MASSCAN full TCP (rate=2000, if=${PRIMARY_IF})" \
+        sudo -n masscan -p1-65535 --rate 2000 --wait 5 -e "$PRIMARY_IF" "$1"
+}
+t_sslscan() {
+    # Probe TLS on common ports. Skip ones not open silently.
+    log_section "SSLSCAN (443,8443,993,995,465)" bash -c "
+        for p in 443 8443 993 995 465; do
+            timeout 20 bash -c \"</dev/tcp/$1/\$p\" 2>/dev/null || continue
+            echo '─── port '\$p' ───'
+            sslscan --no-colour --no-failed '$1:'\$p 2>&1 | head -40
+        done
+    "
+}
+t_smb() {
+    # macOS ships smbutil; smbclient comes from the Homebrew samba formula.
+    log_section "SMB / NetBIOS" bash -c "
+        if command -v nbtscan >/dev/null; then
+            nbtscan -v '$1' 2>&1 | head -20
+        else
+            echo '(nbtscan not available via Homebrew — skipping NetBIOS name scan)'
+        fi
+        echo
+        echo '── smbutil view (macOS built-in) ──'
+        timeout 15 smbutil view -g \"//$1\" 2>&1 | head -30
+        if command -v smbclient >/dev/null; then
+            echo
+            echo '── smbclient -L ──'
+            timeout 15 smbclient -N -L \"//$1\" 2>&1 | head -30
+        fi
+    "
+}
+t_enum4linux() {
+    log_section "ENUM4LINUX-NG (-A smart sweep)" \
+        timeout 120 enum4linux-ng -A -t 5 "$1"
+}
+t_snmp() {
+    log_section "SNMP onesixtyone (default communities)" bash -c "
+        comm=\$(mktemp)
+        printf 'public\nprivate\ncommunity\nadmin\nmanager\ncisco\n' > \"\$comm\"
+        onesixtyone -c \"\$comm\" '$1' 2>&1 | head -20
+        rm -f \"\$comm\"
+    "
+}
+t_ike() {
+    log_section "IKE-SCAN (IPsec/VPN)" \
+        sudo -n ike-scan -M --retry=2 --timeout=2000 "$1"
+}
+
+# ── added aggressive tactics ─────────────────────────────────────────────────
+t_hping_stealth() {
+    # Multiple stealth scan modes against a small high-value port set.
+    local count="${2:-3}" ports="22,80,443,445,3389,8080"
+    log_section "HPING3 stealth sweep (S/F/X/N/A flags)" bash -c "
+        for mode_flag in '-S SYN' '-F FIN' '-X XMAS' '-Y NULL' '-A ACK'; do
+            mode=\${mode_flag#* }; flag=\${mode_flag%% *}
+            echo \"── \$mode (\$flag) ──\"
+            sudo -n hping3 \$flag -c $count -p ++22 -i u100000 '$1' 2>&1 \
+                | grep -E 'flags|len|^len' | head -10
+        done
+        echo '── fragmented SYN ──'
+        sudo -n hping3 -S -f -c $count -p 80 '$1' 2>&1 | head -10
+    "
+}
+t_hping_flood() {
+    # Bounded high-rate elicitor — caller controls count.
+    local count="${2:-200}" port="${3:-80}"
+    log_section "HPING3 elicitor flood (count=${count} port=${port})" bash -c "
+        sudo -n hping3 -S -p $port -c $count -i u500 '$1' 2>&1 | tail -10
+        echo '── ICMP timestamp ──'
+        sudo -n hping3 --icmp --icmp-ts -c 5 '$1' 2>&1 | head -10
+        echo '── ICMP address-mask ──'
+        sudo -n hping3 --icmp --icmp-addr -c 5 '$1' 2>&1 | head -10
+    "
+}
+
+# ── tactic registry (id|label|fn|kind) ──────────────────────────────────────
+# kind: P=passive, A=active, X=aggressive
+# Registry: id|label|fn|kind|reqcmd. reqcmd is the command that MUST be present
+# for the tactic to do anything; if absent the tactic is skipped (and offered for
+# auto-install). Empty reqcmd = relies only on the macOS base system (route/arp/
+# ndp/lsof/pfctl/log) or carries its own internal fallback (geoip→dig,
+# trace→traceroute).
+TACTICS=(
+    "whois|WHOIS lookup|t_whois|P|whois"
+    "rdns|Reverse DNS|t_rdns|P|dig"
+    "geoip|GeoIP / ASN|t_geoip|P|"
+    "journal|Firewall/unified-log history (24h)|t_journal|P|"
+    "netwatch|Netwatch event history|t_netwatch|P|"
+    "neigh|ARP/NDP / OUI vendor|t_neigh|P|"
+    "conn|Live connections (lsof)|t_connstate|P|"
+    "ct|pf state table entries|t_conntrack|P|"
+    "ipset|pf table membership check|t_ipset|P|"
+    "pcap|tcpdump capture (10s)|t_pcap|P|tcpdump"
+    "tshark|tshark protocol decode (10s)|t_tshark|P|tshark"
+    "p0f|p0f passive fingerprint (15s)|t_p0f|P|p0f"
+    "reach|Reachability + resolver cache (macOS)|t_reach|P|scutil"
+    "bonjour|Bonjour/mDNS discovery (LAN, macOS)|t_bonjour|P|dns-sd"
+    "ppcap|pktap process-attributed capture (macOS)|t_ppcap|P|tcpdump"
+    "pflog|pf log live capture (macOS)|t_pflog|P|tcpdump"
+    "pfrules|pf rules referencing target (macOS)|t_pfrules|P|pfctl"
+    "nettop|nettop per-process snapshot (macOS)|t_nettop|P|nettop"
+    "ping|ICMP ping (4)|t_ping|A|"
+    "trace|mtr / traceroute|t_trace|A|"
+    "nq|nmap quick (-F -sV)|t_nmap_quick|A|nmap"
+    "nban|nmap banner grab|t_nmap_banner|A|nmap"
+    "arp|arp-scan single host (LAN only)|t_arpscan|A|arp-scan"
+    "smb|SMB / NetBIOS enum|t_smb|A|smbutil"
+    "enum|enum4linux-ng smart SMB sweep|t_enum4linux|A|enum4linux-ng"
+    "snmp|SNMP onesixtyone scan|t_snmp|A|onesixtyone"
+    "ike|IKE-scan (IPsec/VPN)|t_ike|A|ike-scan"
+    "ssl|SSLscan TLS enum|t_sslscan|A|sslscan"
+    "nos|nmap OS fingerprint|t_nmap_os|X|nmap"
+    "nudp|nmap UDP top-100|t_nmap_udp|X|nmap"
+    "nfull|nmap full (-A -p-)|t_nmap_full|X|nmap"
+    "nvuln|nmap NSE vuln scripts|t_nmap_vuln|X|nmap"
+    "mass|masscan full TCP (rate 2000)|t_masscan|X|masscan"
+    "hpst|hping3 stealth sweep (S/F/X/N/A)|t_hping_stealth|X|hping3"
+    "hpfl|hping3 elicitor flood (200pkts)|t_hping_flood|X|hping3"
+    "nping|nping storm (icmp+syn+udp)|t_nping_storm|X|nping"
+)
+
+tactic_field() { # id field# → value
+    local id="$1" f="$2" t
+    for t in "${TACTICS[@]}"; do
+        [[ "${t%%|*}" == "$id" ]] && { echo "$t" | awk -F'|' -v f="$f" '{print $f}'; return; }
+    done
+}
+tactic_label() { tactic_field "$1" 2; }
+tactic_fn()    { tactic_field "$1" 3; }
+tactic_kind()  { tactic_field "$1" 4; }
+tactic_reqcmd(){ tactic_field "$1" 5; }
+
+# Rough seconds-per-tactic for ETA / gauge calculations. Fudge generously —
+# real time depends on target responsiveness and host load.
+declare -A TACTIC_ETA=(
+    [whois]=4    [rdns]=2     [geoip]=4    [journal]=8    [netwatch]=2
+    [neigh]=2    [conn]=2     [ct]=3       [ipset]=3      [pcap]=12
+    [tshark]=12  [p0f]=17     [ping]=8     [trace]=20     [nq]=45
+    [nban]=45    [arp]=12     [smb]=20     [enum]=120     [snmp]=20
+    [ike]=10     [ssl]=90     [nos]=30     [nudp]=180     [nfull]=900
+    [nvuln]=300  [mass]=180   [hpst]=15    [hpfl]=12      [nping]=10
+    [reach]=3    [bonjour]=8  [ppcap]=12   [pflog]=12     [pfrules]=3
+    [nettop]=4
+)
+
+# ── runners ──────────────────────────────────────────────────────────────────
+run_tactic() {
+    local id="$1" ip="$2"; shift 2
+    local fn label req
+    fn=$(tactic_fn "$id"); label=$(tactic_label "$id")
+    [[ -z "$fn" ]] && return
+    # Dependency gate: if the tactic's required tool is missing, try a one-shot
+    # auto-install (when AUTO_DEPS is on), then skip cleanly rather than spewing
+    # "command not found". BEGIN/END are still emitted so the ETA/progress gauge
+    # accounts for the (skipped) tactic.
+    req=$(tactic_reqcmd "$id")
+    {
+        echo "[BEGIN $id $(date +%s)]"
+        echo ">>> $label"
+    } | tee -a "$SESSION_LOG" >> "$MASTER_LOG"
+    if [[ -n "$req" ]] && ! have "$req"; then
+        if [[ "${AUTO_DEPS:-0}" == 1 && "$PM" != none ]]; then
+            install_for_cmds "$req" >>"$LOG_DIR/dep-install.log" 2>&1 || true
+        fi
+        if ! have "$req"; then
+            log_section "$label — SKIPPED (missing: $req)" \
+                echo "To enable: $(dep_hint "$req")"
+            echo "[END $id $(date +%s)]" | tee -a "$SESSION_LOG" >> "$MASTER_LOG"
+            return
+        fi
+    fi
+    "$fn" "$ip" "$@"
+    echo "[END $id $(date +%s)]" | tee -a "$SESSION_LOG" >> "$MASTER_LOG"
+}
+
+# Filter the registry by kind characters in $1, e.g. "P" or "PA" or "PAX".
+ids_by_kind() {
+    local want="$1" t k
+    for t in "${TACTICS[@]}"; do
+        k=$(echo "$t" | awk -F'|' '{print $4}')
+        [[ "$want" == *"$k"* ]] && echo "${t%%|*}"
+    done
+}
+
+# Echo the planned tactic ID list for a mode (one per line).
+# Args: mode [rounds] [single-pick-id-list]
+planned_tactics() {
+    local mode="$1" rounds="${2:-1}" sel="${3:-}" r
+    case "$mode" in
+        S) printf '%s\n' $sel ;;
+        P) ids_by_kind "P" ;;
+        A) ids_by_kind "PA" ;;
+        F) ids_by_kind "PAX" ;;
+        R) for ((r=1; r<=rounds; r++)); do
+                ids_by_kind "P"
+                (( r >= 2 )) && printf '%s\n' ping trace nq nban
+                (( r >= 3 )) && printf '%s\n' smb enum snmp ike ssl nos
+                (( r >= 4 )) && printf '%s\n' nudp nvuln mass hpst nping
+                (( r >= 5 )) && printf '%s\n' nfull hpfl hpfl
+                (( r >= 6 )) && printf '%s\n' hpfl hpfl hpfl hpfl hpfl
+                (( r == 1 || r == 3 )) && echo arp
+            done ;;
+    esac | grep -v '^$'
+}
+
+sum_eta() {
+    local total=0 id
+    for id in "$@"; do total=$(( total + ${TACTIC_ETA[$id]:-15} )); done
+    echo "$total"
+}
+
+# ── scan state (per-pid file in $STATE_DIR) ──────────────────────────────────
+register_scan() {
+    local pid="$1" ip="$2" log="$3" total_eta="$4"; shift 4
+    {
+        echo "ip=$ip"
+        echo "log=$log"
+        echo "started=$(date +%s)"
+        echo "total_eta=$total_eta"
+        # IMPORTANT: quote — without quotes, "source" treats "planned=a b c" as
+        # a temp env assignment "planned=a" prefixed onto command "b c", so the
+        # variable ends up empty in the reader's scope.
+        printf 'planned=%q\n' "$*"
+    } > "$STATE_DIR/$pid"
+}
+
+cleanup_state() {
+    local f pid
+    for f in "$STATE_DIR"/*; do
+        [[ -f "$f" ]] || continue
+        pid=$(basename "$f")
+        kill -0 "$pid" 2>/dev/null || rm -f "$f"
+    done
+}
+
+active_scans() {
+    cleanup_state
+    local f pid ip log started total_eta planned
+    for f in "$STATE_DIR"/*; do
+        [[ -f "$f" ]] || continue
+        pid=$(basename "$f")
+        # shellcheck disable=SC1090
+        ip=""; log=""; started=""; total_eta=""; planned=""
+        source "$f"
+        echo "$pid|$ip|$log|$started|$total_eta|$planned"
+    done
+}
+
+scan_progress() {
+    local statefile="$1"
+    local ip="" log="" started=0 total_eta=1 planned=""
+    # shellcheck disable=SC1090
+    source "$statefile"
+    local now elapsed done_eta=0 id
+    now=$(date +%s); elapsed=$(( now - started ))
+    # Sum ETAs of completed tactics (END marker present).
+    for id in $planned; do
+        if grep -qF "[END $id " "$log" 2>/dev/null; then
+            done_eta=$(( done_eta + ${TACTIC_ETA[$id]:-15} ))
+        fi
+    done
+    # Find currently-running tactic (last BEGIN with no matching END), and
+    # add fractional credit for it based on elapsed-since-its-BEGIN. Without
+    # this the gauge sticks at 0% during long single tactics like nfull.
+    local cur="" cur_ts="" cur_eta cur_elapsed
+    read -r cur cur_ts < <(
+        awk '/^\[BEGIN /{b=$2; bts=$3; sub(/]/,"",bts)}
+             /^\[END /  {if($2==b){b=""; bts=""}}
+             END{print b, bts}' "$log" 2>/dev/null
+    )
+    if [[ -n "$cur" && -n "$cur_ts" ]]; then
+        cur_eta=${TACTIC_ETA[$cur]:-15}
+        cur_elapsed=$(( now - cur_ts ))
+        (( cur_elapsed < 0 ))         && cur_elapsed=0
+        (( cur_elapsed > cur_eta ))   && cur_elapsed=$cur_eta
+        done_eta=$(( done_eta + cur_elapsed ))
+    fi
+    local pct=$(( total_eta > 0 ? done_eta * 100 / total_eta : 0 ))
+    (( pct > 99 )) && pct=99
+    echo "$pct|$elapsed|$total_eta|$done_eta|$cur"
+}
+
+run_set() {
+    local ip="$1"; shift
+    local id
+    for id in "$@"; do
+        run_tactic "$id" "$ip"
+    done
+}
+
+# Relentless escalation: N rounds, growing intensity. Bound by rounds arg.
+# Each round adds layers: passive → mild → service-enum → aggressive → flood.
+run_relentless() {
+    local ip="$1" rounds="${2:-4}"
+    local r rate count flood
+    for (( r=1; r<=rounds; r++ )); do
+        echo "########## ROUND $r/$rounds ##########" >> "$SESSION_LOG"
+        run_set "$ip" $(ids_by_kind "P")
+        if (( r >= 2 )); then run_set "$ip" ping trace nq nban; fi
+        if (( r >= 3 )); then run_set "$ip" smb enum snmp ike ssl nos; fi
+        if (( r >= 4 )); then
+            run_set "$ip" nudp nvuln mass hpst
+            rate=$(( 50 * r )); count=$(( 10 * r ))
+            t_nping_storm "$ip" "$rate" "$count"
+        fi
+        if (( r >= 5 )); then
+            run_set "$ip" nfull
+            flood=$(( 100 * r ))
+            t_hping_flood "$ip" "$flood" 80
+            t_hping_flood "$ip" "$flood" 443
+        fi
+        if (( r >= 6 )); then
+            # Final round: maximum elicitation across multiple ports.
+            for p in 22 53 445 3389 8080; do
+                t_hping_flood "$ip" 500 "$p"
+            done
+        fi
+        if is_lan "$ip" && (( r == 1 || r == 3 )); then run_tactic arp "$ip"; fi
+    done
+}
+
+# Multi-select tactic picker → list of ids.
+pick_tactics() {
+    local -a items=()
+    local t id label kind
+    for t in "${TACTICS[@]}"; do
+        id=$(echo "$t" | awk -F'|' '{print $1}')
+        label=$(echo "$t" | awk -F'|' '{print $2}')
+        kind=$(echo "$t" | awk -F'|' '{print $4}')
+        items+=("$id" "[$kind] $label" "off")
+    done
+    ui --separate-output --checklist "Select one or more tactics" \
+        24 78 18 "${items[@]}"
+}
+
+choose_mode() {
+    ui --cancel-label "Back" --menu "Choose investigation mode" 18 70 10 \
+        S "Single pick — choose one or more tactics"        \
+        P "All passive (recon only, no packets to target)"  \
+        A "All active mild (passive + ping/trace/nmap quick)" \
+        F "Full single pass (passive + active + aggressive)" \
+        R "Relentless — escalating rounds (1-6)"            \
+        B "Back to target picker"                           \
+        Q "Quit probesource"                                \
+
+}
+
+show_log() {
+    ui --textbox "$SESSION_LOG" 30 100
+}
+
+# Live progress display. Uses infobox + non-blocking read so ANY keystroke
+# returns to the previous menu. dialog --gauge has no close button (reads
+# stdin until EOF), which is why we don't use it here.
+show_gauge_loop() {
+    local pid="$1" statefile="$2"
+    local pct elapsed total done_eta cur barlen=50 filled empty bar mins secs
+    while kill -0 "$pid" 2>/dev/null; do
+        IFS='|' read -r pct elapsed total done_eta cur \
+            < <(scan_progress "$statefile")
+        filled=$(( pct * barlen / 100 ))
+        empty=$(( barlen - filled ))
+        bar=""
+        (( filled > 0 )) && bar=$(printf '#%.0s' $(seq 1 $filled))
+        (( empty  > 0 )) && bar+=$(printf '.%.0s' $(seq 1 $empty))
+        mins=$(( elapsed / 60 )); secs=$(( elapsed % 60 ))
+        local etam=$(( total / 60 )) etas=$(( total % 60 ))
+        ui --title "Scan progress  (press any key to return)" --infobox \
+"Target progress: ${pct}%
+
+[${bar}]
+
+  Elapsed:           ${mins}m ${secs}s
+  ETA total:         ${etam}m ${etas}s   (budget: ${done_eta}/${total}s)
+  Currently running: ${cur:-finishing}
+  PID:               ${pid}
+
+Press any key to return to the scan menu.
+The scan keeps running in the background." 14 78
+        # 2s tick, any keypress breaks out.
+        read -t 2 -rsn1 _ </dev/tty && return 0
+    done
+    ui --msgbox "Scan complete (pid ${pid})." 7 50
+}
+
+# ── identification summary ──────────────────────────────────────────────────
+# Parse a session log and report best-known value for each identification field.
+# Each row prints "field: value" or "field: unknown".
+summarize_ids() {
+    local log="$1"
+    [[ -r "$log" ]] || { echo "log not readable: $log"; return; }
+    local target scope rdns asn org country geoip mac vendor \
+          os_nmap os_guess os_p0f tcp udp http server tls smb_host \
+          smb_domain shares snmp ike drop_count netwatch_hits
+
+    target=$(grep -m1 -oP 'target=\K\S+' "$log")
+    scope=$(grep -m1 -oP '^\s*scope:\s*\K.*' "$log")
+
+    rdns=$(gawk '
+        BEGIN { IGNORECASE=1 }
+        /REVERSE DNS/ { f=NR }
+        f && NR>f && NR<=f+8 && /^[a-zA-Z0-9][a-zA-Z0-9._-]*\.$/ {
+            sub(/\.$/,""); print; exit
+        }' "$log")
+    asn=$(grep -m1 -oP 'origin AS\s*=?\s*\K[0-9]+' "$log")
+    [[ -z "$asn" ]] && asn=$(grep -m1 -oP '^\s*"?\K[0-9]+\s*\|\s*[0-9./]+\s*\|\s*\w+' "$log" | awk '{print $1}')
+    org=$(grep -m1 -iP '^(OrgName|netname|descr|org-name):' "$log" | sed -E 's/^[A-Za-z-]+:\s*//' | head -1)
+    country=$(grep -m1 -iP '^country:' "$log" | sed -E 's/^[Cc]ountry:\s*//')
+    geoip=$(grep -m1 -oP 'GeoIP[^:]*:\s*\K.*' "$log")
+
+    # MAC: try (a) arp/ndp lladdr, (b) nmap "MAC Address:" line, (c) the kernel
+    # firewall log fields (present only on Linux/UFW logs — a no-op on macOS).
+    mac=$(grep -m1 -oP 'lladdr \K[0-9a-f:]+' "$log")
+    [[ -z "$mac" ]] && mac=$(grep -m1 -oP 'MAC Address:\s*\K[0-9A-Fa-f:]{17}' "$log" | tr 'A-F' 'a-f')
+    # macOS arp/ndp "at aa:bb:.. on enX" line in the neigh tactic output.
+    [[ -z "$mac" ]] && mac=$(grep -m1 -oP ' at \K([0-9a-fA-F]{1,2}:){5}[0-9a-fA-F]{1,2}' "$log")
+    if [[ -z "$mac" ]]; then
+        mac=$(grep -m1 -E "MAC=([0-9a-f]{2}:){12}[0-9a-f]{2}:[0-9a-f]{2}.*SRC=$target\b" "$log" \
+              | grep -oP 'MAC=([0-9a-f]{2}:){5}[0-9a-f]{2}:\K([0-9a-f]{2}:){5}[0-9a-f]{2}')
+    fi
+    # Vendor: nmap "MAC Address: ... (Vendor)" first; OUI db fallback if Unknown
+    # or missing; finally the OUI block from the neigh tactic.
+    vendor=$(grep -m1 -oP 'MAC Address:\s+[0-9A-Fa-f:]{17}\s+\(\K[^)]+' "$log")
+    [[ "$vendor" == "Unknown" ]] && vendor=""
+    if [[ -z "$vendor" ]]; then
+        # The neigh tactic prints "OUI vendor:" then blank/vendor. Skip blanks,
+        # but stop at the next log_section boundary (═, BEGIN/END marker, or
+        # a tactic header line) so an empty OUI block doesn't bleed into the
+        # next section's title.
+        vendor=$(awk '
+            /^OUI vendor:/ {
+                while ((getline line) > 0) {
+                    gsub(/\r/, "", line)
+                    sub(/^[[:space:]]+/, "", line)
+                    if (line ~ /^═/ || line ~ /^\[(BEGIN|END) /) break
+                    if (line == "" || line ~ /^>>>/) continue
+                    print line; exit
+                }
+            }' "$log")
+    fi
+    # Same OUI cascade as the live neigh tactic (cache → IEEE → arp-scan → nmap).
+    if [[ -z "$vendor" && -n "$mac" ]]; then
+        vendor=$(oui_vendor "$mac")
+    fi
+
+    os_nmap=$(grep -m1 -oP 'OS details:\s*\K.*' "$log")
+    os_guess=$(grep -m1 -oP 'Aggressive OS guesses:\s*\K.*' "$log")
+    os_p0f=$(grep -m1 -oP '\|\s*os\s+=\s+\K[^|]+' "$log")
+    # nmap's "Service Info: OS: X" inferred from service banners.
+    local os_svcinfo
+    os_svcinfo=$(grep -m1 -oP 'Service Info:[^|]*?OS:\s*\K[^;]*' "$log" | sed 's/[[:space:]]*$//')
+    # Network distance from nmap.
+    local distance
+    distance=$(grep -m1 -oP 'Network Distance:\s*\K\d+\s+hops?' "$log")
+    # TTL hint from firewall log (Linux only; harmless no-op on macOS). TTL only
+    # decrements end-to-end, so the MAX observed value is closest to the source's
+    # initial TTL.
+    local ttl ttl_hint=""   # ttl_hint stays unset if no TTL in the log (always
+                            # the case on macOS: no UFW/kernel TTL= lines) — must
+                            # init or `set -u` aborts the summary at display time.
+    ttl=$(grep -E "SRC=$target\b" "$log" | grep -oP 'TTL=\K\d+' | sort -n | tail -1)
+    if [[ -n "$ttl" ]]; then
+        case "$ttl" in
+            32|64|6[5-9]|7[0-9]|80) ttl_hint="$ttl  (Linux/BSD/macOS)" ;;
+            12[0-9]|13[0-9])         ttl_hint="$ttl  (Windows)" ;;
+            25[0-5])                 ttl_hint="$ttl  (router/printer/embedded)" ;;
+            *)                       ttl_hint="$ttl" ;;
+        esac
+    fi
+
+    # Open ports — capture port + service so the summary shows "53/udp domain"
+    # rather than just "53". sort -u dedupes across multiple nmap rounds.
+    tcp=$(grep -oP '^\s*\K[0-9]+/tcp\s+open\s+\S+' "$log" \
+          | awk '{print $1" "$3}' | sort -u -k1,1 -V \
+          | awk '{printf "%s ",$1"("$2")"} END{print ""}' \
+          | sed 's/ $//')
+    udp=$(grep -oP '^\s*\K[0-9]+/udp\s+open\s+\S+' "$log" \
+          | awk '{print $1" "$3}' | sort -u -k1,1 -V \
+          | awk '{printf "%s ",$1"("$2")"} END{print ""}' \
+          | sed 's/ $//')
+
+    server=$(grep -m1 -oP 'http-server-header:\s*\K.*' "$log")
+    [[ -z "$server" ]] && server=$(grep -m1 -oP 'Server:\s*\K\S.*' "$log")
+    tls=$(grep -m1 -oP 'Subject:\s*\K.*' "$log")
+
+    smb_host=$(grep -m1 -oP 'NetBIOS computer name:\s*\K\S+' "$log")
+    [[ -z "$smb_host" ]] && smb_host=$(grep -m1 -oP 'NetBIOS Name:\s*\K\S+' "$log")
+    smb_domain=$(grep -m1 -oP 'Workgroup:\s*\K\S+' "$log")
+    [[ -z "$smb_domain" ]] && smb_domain=$(grep -m1 -oP 'Domain:\s*\K\S+' "$log")
+    shares=$(grep -oP '^\s*\K[A-Za-z0-9_$.-]+\s+(Disk|IPC|Printer)' "$log" | awk '{print $1}' | sort -u | tr '\n' ' ')
+
+    # mDNS / Bonjour announcements (from tshark/p0f/tcpdump capture lines).
+    # Device name appears as "PTR <name>._<svc>._tcp.local"; can contain spaces.
+    local mdns_dev mdns_host mdns_svc nmap_dev http_server
+    mdns_dev=$(grep -oP 'PTR \K[^_]+?(?=\._(ipp|ipps|printer|airplay|googlecast|raop|hap|companion-link|sleep-proxy|smb|workstation|http|spotify-connect)\._t?cp\.local)' "$log" \
+               | sed 's/[[:space:]]*$//' | sort -u | head -1)
+    mdns_host=$(grep -oP '\b[A-Za-z][A-Za-z0-9-]{2,}\.local\b' "$log" \
+                | grep -vE '^(tcp|udp)\.local$' | sort -u | head -1)
+    mdns_svc=$(grep -oP '_[a-z][a-z0-9-]+\._(tcp|udp)\.local' "$log" \
+               | sort -u | paste -sd, -)
+    # nmap "Service Info: Device: print server / OS: Linux" hints.
+    nmap_dev=$(grep -m1 -oP 'Service Info:[^|]*?Device:\s*\K[^;]*' "$log" | sed 's/[[:space:]]*$//')
+    http_server=$(grep -m1 -oP 'http-server-header:\s*\K.*' "$log")
+    [[ -z "$server" ]] && server="$http_server"
+
+    snmp=$(grep -m1 -oP 'Real Name:\s*\K.*' "$log")
+    [[ -z "$snmp" ]] && snmp=$(grep -m1 -oP 'sysDescr.*?:\s*\K.*' "$log")
+    ike=$(grep -m1 -oP 'IKE\s+(Version|Vendor)[^:]*:\s*\K.*' "$log")
+
+    drop_count=$(grep -cE '\[UFW BLOCK\]|_DROP|FINAL_REJECT|[Dd]eny|[Bb]lock' "$log")
+    netwatch_hits=$(grep -c 'NETWATCH HISTORY' "$log")
+
+    show() { printf "  %-22s %s\n" "$1:" "${2:-unknown}"; }
+
+    {
+        echo "═══════════════════════════════════════════════════════════"
+        echo "          IDENTIFICATION SUMMARY"
+        echo "          $(basename "$log")"
+        echo "═══════════════════════════════════════════════════════════"
+        echo
+        echo "── NETWORK ──"
+        show "Target IP"          "$target"
+        show "Scope"              "$scope"
+        show "Reverse DNS"        "$rdns"
+        show "ASN"                "$asn"
+        show "Org / netname"      "$org"
+        show "Country"            "$country"
+        show "GeoIP"              "$geoip"
+        echo
+        echo "── DEVICE / OS ──"
+        show "MAC address"        "$mac"
+        show "OUI vendor"         "$vendor"
+        show "mDNS device name"   "$mdns_dev"
+        show "mDNS hostname"      "$mdns_host"
+        show "Device class (nmap)" "$nmap_dev"
+        show "OS (nmap)"          "$os_nmap"
+        show "OS guess (nmap)"    "$os_guess"
+        show "OS (nmap svc-info)" "$os_svcinfo"
+        show "OS (p0f passive)"   "$os_p0f"
+        show "TTL hint (kernel)"  "$ttl_hint"
+        show "Network distance"   "$distance"
+        echo
+        echo "── SERVICES ──"
+        show "Open TCP ports"     "$tcp"
+        show "Open UDP ports"     "$udp"
+        show "HTTP server"        "$server"
+        show "TLS subject"        "$tls"
+        show "mDNS services"      "$mdns_svc"
+        show "SMB hostname"       "$smb_host"
+        show "SMB workgroup/dom"  "$smb_domain"
+        show "SMB shares"         "$shares"
+        show "SNMP sysDescr"      "$snmp"
+        show "IKE/IPsec"          "$ike"
+        echo
+        echo "── ACTIVITY (this log) ──"
+        show "Drop log lines"     "$drop_count"
+        show "Tactics run"        "$(grep -c '^\[BEGIN ' "$log")"
+    }
+}
+
+show_summary_box() {
+    local log="$1" tmp
+    tmp=$(mktemp)
+    summarize_ids "$log" > "$tmp"
+    ui --title "Identification summary" --textbox "$tmp" 32 78
+    rm -f "$tmp"
+}
+
+# Download a fresh IEEE OUI database into the cache.
+update_oui_db() {
+    local url="https://standards-oui.ieee.org/oui/oui.txt"
+    local tmp
+    tmp=$(mktemp)
+    ui --infobox "Downloading $url ..." 5 70
+    if curl -fsSL --max-time 60 "$url" -o "$tmp" 2>/dev/null; then
+        local lines size
+        lines=$(grep -c "(base 16)" "$tmp")
+        size=$(stat -c%s "$tmp")
+        if (( lines > 1000 )); then
+            mv "$tmp" "$OUI_CACHE"
+            info "Updated OUI cache: $OUI_CACHE\n${lines} entries, ${size} bytes."
+        else
+            rm -f "$tmp"
+            info "Download succeeded but file looks malformed (${lines} entries). Aborted."
+        fi
+    else
+        rm -f "$tmp"
+        info "Download failed. Check network / proxy and retry."
+    fi
+}
+
+# Top-level: pick a saved log and show its identification summary.
+summary_from_log() {
+    local -a items=("MASTER" "rolling master log (all sessions)")
+    local f base mtime
+    while IFS= read -r f; do
+        base=$(basename "$f")
+        [[ "$base" == "master.log" ]] && continue
+        mtime=$(stat -c '%y' "$f" 2>/dev/null | cut -d. -f1)
+        items+=("$base" "$mtime")
+    done < <(ls -1t "$LOG_DIR"/*.log 2>/dev/null)
+    (( ${#items[@]} == 0 )) && { info "No saved logs."; return; }
+    local pick
+    pick=$(ui --cancel-label "Back" --menu "Pick a log to summarize" \
+              22 80 16 "${items[@]}") || return 0
+    local target
+    [[ "$pick" == "MASTER" ]] && target="$MASTER_LOG" || target="$LOG_DIR/$pick"
+    show_summary_box "$target"
+}
+
+# ── interactive view loop for a running (or completed) scan ──────────────────
+# Keeps the user in control: tail / snapshot / gauge / summary / stop / detach.
+run_scan_view() {
+    local pid="$1" log="$2" statefile="$3"
+    while true; do
+        local running=0
+        kill -0 "$pid" 2>/dev/null && running=1
+        local title
+        if (( running )); then
+            title="Scan running (pid $pid)"
+        else
+            title="Scan complete"
+        fi
+        # Build the menu as an array — the "Stop" row is conditional. (Injecting
+        # it via `$(… echo "S \"…\"")` word-splits on the literal quotes and
+        # spawns bogus "scan (kill" / "pid NNN)" entries, so use an array here.)
+        local -a menu=(
+            T "Resume live tail (close tail to return here)"
+            V "View log snapshot"
+            P "Progress gauge"
+            Y "Identification summary"
+        )
+        (( running )) && menu+=( S "Stop scan (kill pid $pid)" )
+        menu+=( B "Back to main menu (scan keeps running)" )
+        local act
+        act=$(ui --cancel-label "Detach" --menu "$title" 18 72 10 "${menu[@]}") || return 0
+        case "$act" in
+            T) if [[ "$UI" == "dialog" ]]; then
+                   ui --title "tail $log  (close to return to menu)" \
+                          --tailbox "$log" 32 110
+               else
+                   ui --textbox "$log" 32 110
+               fi ;;
+            V) ui --textbox "$log" 32 110 ;;
+            P) show_gauge_loop "$pid" "$statefile" ;;
+            Y) show_summary_box "$log" ;;
+            S) if ui --yesno "Kill scan pid $pid?  (a partial-data summary will be offered)" 8 60; then
+                   kill "$pid" 2>/dev/null
+                   # Give in-flight tactic a moment to flush its END marker.
+                   sleep 1
+                   rm -f "$statefile"
+                   ui --yesno "Scan aborted. View partial identification summary?" 7 60 \
+                       && show_summary_box "$log"
+                   return 0
+               fi ;;
+            B) # Detach: keep scan running, but offer a snapshot summary first.
+               if (( running )); then
+                   ui --yesno "Detach to main menu. View summary so far first?" 7 60 \
+                       && show_summary_box "$log"
+               fi
+               return 0 ;;
+        esac
+        # If scan finished while in a sub-view, offer summary then exit cleanly.
+        if (( running )) && ! kill -0 "$pid" 2>/dev/null; then
+            ui --yesno "Scan finished. View identification summary?" 7 60 \
+                && show_summary_box "$log"
+            return 0
+        fi
+    done
+}
+
+# Browse logs: master rolling log + per-session logs.
+browse_logs() {
+    while true; do
+        local -a items=("MASTER" "rolling master log (all sessions)")
+        local f base size mtime
+        # newest first
+        while IFS= read -r f; do
+            base=$(basename "$f")
+            [[ "$base" == "master.log" ]] && continue
+            size=$(stat -c%s "$f" 2>/dev/null)
+            mtime=$(stat -c '%y' "$f" 2>/dev/null | cut -d. -f1)
+            items+=("$base" "${mtime}  ${size}B")
+        done < <(ls -1t "$LOG_DIR"/*.log 2>/dev/null)
+        local pick
+        pick=$(ui --menu "Saved investigation logs ($LOG_DIR)" \
+                  24 90 18 "${items[@]}") || return 0
+        local target
+        if [[ "$pick" == "MASTER" ]]; then
+            target="$MASTER_LOG"
+        else
+            target="$LOG_DIR/$pick"
+        fi
+        # Action menu for the selected log.
+        local act
+        act=$(ui --menu "Log: $(basename "$target")" 14 60 6 \
+                V "View"                  \
+                T "Tail (live, follow)"   \
+                D "Delete"                \
+                B "Back"                  \
+               ) || continue
+        case "$act" in
+            V) ui --textbox "$target" 32 110 ;;
+            T) [[ "$UI" == "dialog" ]] \
+                 && ui --title "tail $target" --tailbox "$target" 32 110 \
+                 || ui --textbox "$target" 32 110 ;;
+            D) ui --yesno "Delete $(basename "$target")?" 7 60 \
+                 && rm -f "$target" ;;
+            B) continue ;;
+        esac
+    done
+}
+
+# ── background-scan comforts (macOS-native, best-effort) ─────────────────────
+# Hold a power assertion for the life of THIS subshell so a long sweep (nfull /
+# relentless) can't be interrupted by the Mac sleeping. -i no idle sleep, -s no
+# system sleep on AC, -w waits on our pid then exits.
+keep_awake() { have caffeinate && caffeinate -isw "$BASHPID" >/dev/null 2>&1 & }
+
+# Post a desktop notification that a background scan finished (the tool's whole
+# model is detach-and-come-back). No-op if osascript is unavailable.
+notify_done() {
+    have osascript || return 0
+    osascript -e "display notification \"Scan of $1 finished — reopen probesource to review.\" with title \"probesource\" sound name \"Submarine\"" >/dev/null 2>&1 || true
+}
+
+# End-of-scan epilogue: the done marker (to session + master logs) then notify.
+scan_epilogue() {
+    echo "── done ──" | tee -a "$SESSION_LOG" >> "$MASTER_LOG"
+    notify_done "$1"
+}
+
+# ── main loop ────────────────────────────────────────────────────────────────
+investigate() {
+    local ip mode tactics rounds rc
+    while true; do
+        ip=$(choose_target); rc=$?
+        (( rc == 2 )) && { QUIT=1; return 0; }   # Quit chosen in the picker
+        (( rc != 0 )) && return 0                # Back to main menu
+        mode=$(choose_mode) || continue
+        [[ "$mode" == "B" ]] && continue
+        [[ "$mode" == "Q" ]] && { QUIT=1; return 0; }
+        break
+    done
+
+    SESSION_LOG="${LOG_DIR}/$(echo "$ip" | tr ':' '_')-$(date +%Y%m%d-%H%M%S).log"
+    : > "$SESSION_LOG"
+    {
+        echo "════════════════════════════════════════════════════════════"
+        echo "  probesource session  target=$ip"
+        echo "  started: $(date '+%Y-%m-%d %H:%M:%S')"
+        is_lan "$ip" && echo "  scope:   LAN (directly connected)" \
+                     || echo "  scope:   WAN (routed)"
+        echo "  log:     $SESSION_LOG"
+        echo "════════════════════════════════════════════════════════════"
+    } | tee -a "$SESSION_LOG" >> "$MASTER_LOG"
+
+    # Resolve planned tactic list (for ETA + progress).
+    local -a planned
+    case "$mode" in
+        S)  tactics=$(pick_tactics) || return 0
+            mapfile -t planned < <(planned_tactics S 1 "$tactics") ;;
+        P|A|F)
+            mapfile -t planned < <(planned_tactics "$mode") ;;
+        R)  rounds=$(ui --cancel-label "Back" --inputbox \
+                "Escalation rounds (1-6):" 8 40 "4") || return 0
+            [[ "$rounds" =~ ^[1-6]$ ]] || rounds=4
+            mapfile -t planned < <(planned_tactics R "$rounds") ;;
+    esac
+    local total_eta
+    total_eta=$(sum_eta "${planned[@]}")
+
+    # Launch the tactic batch in a background subshell. Each subshell keeps the
+    # Mac awake for its own lifetime (caffeinate) and posts a desktop
+    # notification when it finishes — both macOS-native, both best-effort.
+    case "$mode" in
+        S)  ( keep_awake; run_set "$ip" $tactics;          scan_epilogue "$ip" ) & ;;
+        P)  ( keep_awake; run_set "$ip" $(ids_by_kind "P");   scan_epilogue "$ip" ) & ;;
+        A)  ( keep_awake; run_set "$ip" $(ids_by_kind "PA");  scan_epilogue "$ip" ) & ;;
+        F)  ( keep_awake; run_set "$ip" $(ids_by_kind "PAX"); scan_epilogue "$ip" ) & ;;
+        R)  ( keep_awake; run_relentless "$ip" "$rounds";     scan_epilogue "$ip" ) & ;;
+    esac
+    local pid=$!
+    register_scan "$pid" "$ip" "$SESSION_LOG" "$total_eta" "${planned[@]}"
+
+    run_scan_view "$pid" "$SESSION_LOG" "$STATE_DIR/$pid"
+}
+
+# Resume a scan that's still running (or browse a finished one).
+resume_scan() {
+    cleanup_state
+    local -a items=()
+    local entry pid ip log started total_eta planned now elapsed pct done_eta cur
+    while IFS='|' read -r pid ip log started total_eta planned; do
+        [[ -z "$pid" ]] && continue
+        now=$(date +%s); elapsed=$(( now - started ))
+        IFS='|' read -r pct _ _ done_eta cur < <(scan_progress "$STATE_DIR/$pid")
+        items+=("$pid" "${ip}  ${pct}%  elapsed=${elapsed}s  cur=${cur:-?}")
+    done < <(active_scans)
+    if (( ${#items[@]} == 0 )); then
+        info "No running scans."
+        return 0
+    fi
+    items+=("B" "Back to main menu")
+    local pick
+    pick=$(ui --cancel-label "Back" --menu "Active scans" 18 78 12 \
+        "${items[@]}") || return 0
+    [[ "$pick" == "B" ]] && return 0
+    # Look up the picked pid's metadata.
+    local f="$STATE_DIR/$pick"
+    [[ -f "$f" ]] || { info "Scan no longer running."; return 0; }
+    local ip2 log2
+    ip2=$(grep -oP '^ip=\K.*' "$f")
+    log2=$(grep -oP '^log=\K.*' "$f")
+    SESSION_LOG="$log2"
+    run_scan_view "$pick" "$log2" "$f"
+}
+
+main() {
+    detect_pm
+    ensure_gnu_userland
+
+    if ! sudo -n true 2>/dev/null; then
+        clear
+        echo "probesource needs sudo for tcpdump, tshark, p0f, arp-scan,"
+        echo "nmap (OS/SYN scans), mtr, masscan, hping3, ike-scan, and pf"
+        echo "state/table inspection (pfctl). Firewall history via the unified"
+        echo "log also needs sudo. (enum4linux-ng runs unprivileged via pipx.)"
+        sudo -v || die "sudo required"
+    fi
+
+    # Startup dependency check runs ONCE, on the first run of a fresh install,
+    # then never auto-prompts again — check on demand from the menu (D). The flag
+    # marks it done; delete it to force the one-time prompt to run again.
+    local dep_flag="${LOG_DIR}/.startup-deps-checked"
+    if [[ ! -e "$dep_flag" ]]; then
+        [[ -n "$(missing_cmds)" ]] && check_and_install_deps
+        touch "$dep_flag" 2>/dev/null || true
+    fi
+
+    QUIT=0   # set by the pickers' Quit option to break out of the menu loop
+    while true; do
+        cleanup_state
+        local n_active
+        n_active=$(active_scans | wc -l)
+        local choice
+        local oui_age="(no cache)"
+        [[ -r "$OUI_CACHE" ]] && oui_age="cached $(stat -c '%y' "$OUI_CACHE" | cut -d' ' -f1)"
+        choice=$(ui --cancel-label "Quit" --menu \
+            "probesource (macOS) — pick an action" 18 70 9 \
+            I "Investigate a new target"                       \
+            R "Resume / view running scans (${n_active} active)" \
+            L "Browse / read past logs"                        \
+            S "Identification summary from a saved log"        \
+            M "Tail master rolling log live"                   \
+            U "Update OUI vendor database (${oui_age})"        \
+            D "Check / install probe tool dependencies"        \
+            Q "Quit"                                           \
+           ) || break
+        case "$choice" in
+            I) investigate ;;
+            R) resume_scan ;;
+            L) browse_logs ;;
+            S) summary_from_log ;;
+            M) [[ "$UI" == "dialog" ]] \
+                 && ui --title "tail $MASTER_LOG" --tailbox "$MASTER_LOG" 32 110 \
+                 || ui --textbox "$MASTER_LOG" 32 110 ;;
+            U) update_oui_db ;;
+            D) check_and_install_deps ;;
+            Q) break ;;
+        esac
+        (( QUIT )) && break   # Quit chosen from a sub-menu picker
+    done
+    clear
+    echo "Logs saved under: $LOG_DIR"
+    echo "Master log:       $MASTER_LOG"
+}
+
+main "$@"

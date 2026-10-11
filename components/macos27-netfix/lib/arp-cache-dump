@@ -1,0 +1,33 @@
+#!/bin/sh
+# arp-cache-dump — publish the ARP table for consumers that cannot read it.
+#
+# On macOS 27 a process forked by a non-Apple-signed binary gets an EMPTY ARP
+# table: `arp -an` prints nothing and exits 0, `arp -n <ip>` says "no entry".
+# The restriction is inherited — re-exec'ing an Apple shell from a tainted
+# parent does NOT escape it — so the dump must be rooted at an Apple binary.
+# That is exactly what the com.netwatch.arpcache LaunchAgent provides by
+# invoking /bin/sh directly.
+#
+# NEVER change that plist to invoke Homebrew bash. It would reintroduce the
+# precise bug this exists to work around, and would do so silently.
+#
+# Written atomically so a reader never sees a half-written table.
+
+CACHE="${1:-$HOME/.local/share/netwatch/arp.cache}"
+DIR=$(dirname "$CACHE")
+
+mkdir -p "$DIR" || exit 1
+
+TMP=$(mktemp "${CACHE}.XXXXXX") || exit 1
+trap 'rm -f "$TMP"' EXIT INT TERM
+
+if /usr/sbin/arp -an > "$TMP" 2>/dev/null && [ -s "$TMP" ]; then
+    mv -f "$TMP" "$CACHE" || exit 1
+    trap - EXIT INT TERM
+    exit 0
+fi
+
+# Empty result: leave the previous cache in place rather than publishing an
+# empty table, which a consumer could misread as "no neighbours". Consumers are
+# expected to apply their own staleness limit — see arp_table.bash.
+exit 1

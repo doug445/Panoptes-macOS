@@ -1,0 +1,87 @@
+#!/opt/homebrew/bin/bash
+# nettop (macOS) — summarize netwatch DROP log by top source IPs
+# Uses arp-scan for LAN hosts (active + vendor lookup), falls back to system arp.
+
+LOG=~/.local/share/netwatch/events.log
+
+# --- macOS 27 ARP-table workaround ------------------------------------------
+# A process forked by a non-Apple-signed binary (Homebrew bash) gets an EMPTY
+# ARP table. Read direct first so this still works when run by hand from zsh
+# and on unaffected machines; fall back to the cache published by the
+# com.netwatch.arpcache LaunchAgent. See components/macos27-netfix in macOS-SecureNetwork-Suite.
+ARP_CACHE="${HOME}/.local/share/netwatch/arp.cache"
+ARP_CACHE_MAX_AGE=120
+arp_stale_warned=0
+
+arp_table() {
+    local direct now mtime age
+    direct=$(arp -an 2>/dev/null || true)
+    if [[ -n "$direct" ]]; then
+        printf '%s\n' "$direct"
+        return 0
+    fi
+
+    [[ -r "$ARP_CACHE" ]] || {
+        if (( arp_stale_warned == 0 )); then
+            printf '%s\n' "warning: ARP table unreadable and no cache at $ARP_CACHE" >&2
+            printf '%s\n' "         run the suite installer (component: macos27-netfix)" >&2
+            arp_stale_warned=1
+        fi
+        return 0
+    }
+
+    # A stale cache is worse than none: it reports pre-change data and can mask
+    # the very thing these tools look for. Refuse it, and say so.
+    now=$(date +%s)
+    mtime=$(stat -f %m "$ARP_CACHE" 2>/dev/null || echo 0)
+    age=$(( now - mtime ))
+    if (( age > ARP_CACHE_MAX_AGE )); then
+        if (( arp_stale_warned == 0 )); then
+            printf '%s\n' "warning: ARP cache is ${age}s stale — results incomplete" >&2
+            arp_stale_warned=1
+        fi
+        return 0
+    fi
+
+    arp_stale_warned=0
+    cat "$ARP_CACHE" 2>/dev/null || true
+}
+
+# Resolve one MAC from the table (replaces `arp -n "$ip" | awk ...`).
+arp_mac_for_ip() {
+    local ip="$1"
+    arp_table | awk -v want="($ip)" '
+        $2 == want {
+            for (i = 1; i <= NF; i++)
+                if ($i ~ /^[0-9a-f][0-9a-f]?(:[0-9a-f][0-9a-f]?){5}$/) { print $i; exit }
+        }
+    ' || true
+}
+# --- end ARP-table workaround -----------------------------------------------
+
+[ -r "$LOG" ] || { echo "cannot read $LOG" >&2; exit 1; }
+
+# Build LAN IP→MAC→vendor cache from one arp-scan pass (if available)
+declare -A lan_mac lan_vendor
+if command -v arp-scan &>/dev/null; then
+    while IFS=$'\t' read -r sip smac svendor; do
+        [ -z "$sip" ] && continue
+        lan_mac[$sip]="$smac"
+        lan_vendor[$sip]="$svendor"
+    done < <(sudo arp-scan --localnet --ignoredups 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
+fi
+
+grep DROP "$LOG" | awk -F'src=' 'NF>1{print $2}' | awk '{print $1}' | sort | uniq -c | sort -rn | while read -r count ip; do
+    mac="${lan_mac[$ip]:-}"
+    vendor="${lan_vendor[$ip]:-}"
+
+    # Fallback: system arp (macOS format)
+    if [ -z "$mac" ]; then
+        mac=$(arp_mac_for_ip "$ip")
+    fi
+
+    host=$(dscacheutil -q host -a name "$ip" 2>/dev/null | awk '/^name:/{print $2; exit}')
+    [ -z "$host" ] && host=$(host "$ip" 2>/dev/null | awk '/pointer/{print $NF}' | sed 's/\.$//' | head -1)
+
+    printf "%7s %-15s %-18s %-30s %s\n" "$count" "$ip" "${mac:--}" "${vendor:--}" "${host:-}"
+done

@@ -1,0 +1,5 @@
+# macOS-SecureNetwork-Suite — netcheck: read installed configuration profiles.
+# arp-scan is deliberately NOT here: it lives in a user-writable Homebrew prefix
+# and can write files (-W), so a NOPASSWD rule for it is a root escalation.
+# netcheck/nettop simply prompt for it.
+@USER@ ALL=(root) NOPASSWD: /usr/bin/profiles show -type configuration

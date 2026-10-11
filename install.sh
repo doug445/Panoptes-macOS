@@ -1,0 +1,349 @@
+#!/bin/bash
+# macOS-SecureNetwork-Suite — install.sh
+#
+# One installer for the whole stack: dependencies (Homebrew, Cloudflare WARP,
+# xbar, ProtonVPN, CLI tools, probesource's probe toolset), then every
+# component. Idempotent — re-run any time to repair or update.
+#
+# Run as your normal user (NOT with sudo). It asks for your password once and
+# keeps sudo alive for the root-owned steps; Homebrew must never run as root.
+#
+# USAGE
+#   ./install.sh                     everything
+#   ./install.sh --only warp,dns     just those components
+#   ./install.sh --skip probesource  everything except those
+#   ./install.sh --no-deps           skip dependency installation
+#   ./install.sh --list              list components and exit
+#   ./uninstall.sh                   reverse it
+#
+# COMPONENTS (run in this order)
+#   deps         Homebrew (+ Xcode CLT), formulae, casks, probesource probe tools
+#   firewall     Application Firewall on + stealth mode + logging (netwatch input)
+#   dns          AdGuard DNS (no-log/no-ECS) + Quad9/Cloudflare fallback
+#   sudoers      NOPASSWD rules for the menu's DNS toggle and netcheck
+#   warp         WARP registration, tunnel_only mode, MASQUE, connect
+#   killswitch   warp-killswitch helper + watchdog + xbar menu (security-toggle)
+#   netfix       macOS 27 ARP-cache workaround (installs only if detect.sh says so)
+#   netwatch     netwatch LaunchAgent + nettop
+#   netcheck     netcheck one-shot report
+#   probesource  probesource TUI
+#   shell        checkdns + network aliases/functions for zsh
+#   profiles     AdGuard DoH + Chromium DoH policy profiles (need your approval)
+#   firefox      DoH/ECH/HTTPS-only/TLS user.js for every Firefox profile
+set -u
+export LC_ALL=C
+
+HERE="$(cd "$(dirname "$0")" && pwd -P)"
+C="$HERE/components"
+ALL="deps firewall dns sudoers warp killswitch netfix netwatch netcheck probesource shell profiles firefox"
+
+ADGUARD_DNS="94.140.14.140 94.140.14.141"
+FALLBACK_DNS="9.9.9.9 1.1.1.1"
+
+FORMULAE="bash nmap arp-scan watch speedtest-cli"
+# Casks are skipped when their app is already in /Applications — brew refuses
+# to adopt an app it did not install itself.
+CASKS="cloudflare-warp xbar protonvpn"
+
+SHELL_DIR="$HOME/.config/macos-securenetwork-suite"
+BIN="$HOME/.local/bin"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+red() { printf '\033[31m%s\033[0m\n' "$*"; }
+grn() { printf '\033[32m%s\033[0m\n' "$*"; }
+ylw() { printf '\033[33m%s\033[0m\n' "$*"; }
+hdr() { printf '\n\033[1;36m══ %s ══\033[0m\n' "$*"; }
+die() { red "ERROR: $*"; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ---- args -------------------------------------------------------------------
+ONLY=""; SKIP=""; NO_DEPS=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --only)    ONLY=$(echo "${2:-}" | tr ',' ' '); shift ;;
+        --skip)    SKIP=$(echo "${2:-}" | tr ',' ' '); shift ;;
+        --no-deps) NO_DEPS=1 ;;
+        --list)    echo "$ALL" | tr ' ' '\n'; exit 0 ;;
+        -h|--help) sed -n '2,/^set -u/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
+        *)         die "unknown arg: $1 (try --help)" ;;
+    esac
+    shift
+done
+[ "$NO_DEPS" -eq 1 ] && SKIP="$SKIP deps"
+for c in $ONLY $SKIP; do case " $ALL " in *" $c "*) ;; *) die "unknown component: $c" ;; esac; done
+want() {
+    case " $SKIP " in *" $1 "*) return 1 ;; esac
+    [ -z "$ONLY" ] && return 0
+    case " $ONLY " in *" $1 "*) return 0 ;; esac
+    return 1
+}
+
+# ---- preflight --------------------------------------------------------------
+[ "$(uname -s)" = Darwin ] || die "macOS only."
+[ "$(id -u)" -ne 0 ] || die "run as your normal user, not root (Homebrew refuses root)."
+case "$(uname -m)" in arm64) BREW_PREFIX=/opt/homebrew ;; *) BREW_PREFIX=/usr/local ;; esac
+hdr "macOS-SecureNetwork-Suite"
+echo "  macOS $(sw_vers -productVersion) ($(uname -m)), user $USER, Homebrew prefix $BREW_PREFIX"
+echo "  components: $(for c in $ALL; do want "$c" && printf '%s ' "$c"; done)"
+
+# One password prompt, then keep the timestamp fresh for the whole run.
+sudo -v || die "sudo is required."
+( while kill -0 $$ 2>/dev/null; do sudo -n true 2>/dev/null; sleep 50; done ) &
+KEEPALIVE=$!
+trap 'kill $KEEPALIVE 2>/dev/null' EXIT
+
+FAILED=""
+fail() { red "  ✗ $*"; FAILED="$FAILED\n  - $*"; }
+
+brew_env() {
+    [ -x "$BREW_PREFIX/bin/brew" ] && eval "$("$BREW_PREFIX/bin/brew" shellenv)"
+    have brew
+}
+
+# Copy SRC to DEST, keeping a dated backup if DEST exists and differs.
+put() {
+    local src="$1" dest="$2" mode="${3:-755}"
+    mkdir -p "$(dirname "$dest")"
+    if [ -f "$dest" ] && ! cmp -s "$src" "$dest"; then
+        cp -p "$dest" "$dest.bak.$STAMP" && ylw "  backed up $dest -> $dest.bak.$STAMP"
+    fi
+    cp "$src" "$dest" && chmod "$mode" "$dest"
+}
+
+# Bash-4 scripts are shipped with an Apple-silicon shebang; point it at this
+# machine's Homebrew bash.
+put_bash4() {
+    local tmp
+    tmp=$(mktemp)
+    sed "1s|^#!/opt/homebrew/bin/bash|#!$BREW_PREFIX/bin/bash|" "$1" > "$tmp"
+    put "$tmp" "$2" 755
+    rm -f "$tmp"
+}
+
+# ---- deps -------------------------------------------------------------------
+if want deps; then
+    hdr "Dependencies"
+    if ! brew_env; then
+        ylw "  Homebrew not found — installing (also installs the Xcode Command Line Tools)"
+        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+            || die "Homebrew install failed."
+        brew_env || die "Homebrew installed but brew is not on PATH."
+    fi
+    grn "  Homebrew: $(brew --version | head -1)"
+
+    missing=""
+    for f in $FORMULAE; do brew list --formula "$f" >/dev/null 2>&1 || missing="$missing $f"; done
+    if [ -n "$missing" ]; then
+        echo "  brew install$missing"
+        brew install $missing || fail "brew install$missing"
+    else
+        grn "  formulae present: $FORMULAE"
+    fi
+
+    for cask in $CASKS; do
+        case "$cask" in
+            cloudflare-warp) app="Cloudflare WARP" ;;
+            xbar)            app="xbar" ;;
+            protonvpn)       app="ProtonVPN" ;;
+        esac
+        if [ -d "/Applications/$app.app" ]; then
+            grn "  $app.app present"
+        else
+            echo "  brew install --cask $cask"
+            brew install --cask "$cask" || fail "brew install --cask $cask"
+        fi
+    done
+
+    if want probesource; then
+        echo "  probesource probe toolset (nmap, tshark, p0f, masscan, ... + GNU userland)"
+        bash "$C/probesource/install.sh" --deps-only </dev/null || fail "probesource dependencies"
+    fi
+else
+    brew_env >/dev/null 2>&1 || true
+fi
+
+# ---- firewall ---------------------------------------------------------------
+if want firewall; then
+    hdr "Application Firewall"
+    ALF=/usr/libexec/ApplicationFirewall/socketfilterfw
+    sudo "$ALF" --setglobalstate on  >/dev/null
+    sudo "$ALF" --setstealthmode on  >/dev/null
+    sudo "$ALF" --setloggingmode on  >/dev/null
+    "$ALF" --getglobalstate | sed 's/^/  /'
+    "$ALF" --getstealthmode | sed 's/^/  /'
+fi
+
+# ---- dns --------------------------------------------------------------------
+if want dns; then
+    hdr "AdGuard DNS"
+    # Same services the menu toggles; every other service keeps DHCP DNS.
+    networksetup -listallnetworkservices | tail -n +2 | sed 's/^\*//' | while IFS= read -r svc; do
+        case "$svc" in
+            Wi-Fi|"iPhone USB")
+                sudo networksetup -setdnsservers "$svc" $ADGUARD_DNS $FALLBACK_DNS \
+                    && grn "  $svc -> $(networksetup -getdnsservers "$svc" | tr '\n' ' ')" ;;
+        esac
+    done
+    sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
+fi
+
+# ---- sudoers ----------------------------------------------------------------
+if want sudoers; then
+    hdr "sudoers rules"
+    for name in securenet-dns securenet-netcheck; do
+        tmp=$(mktemp)
+        sed "s|@USER@|$USER|g" "$C/sudoers/$name.in" > "$tmp"
+        if sudo /usr/sbin/visudo -cf "$tmp" >/dev/null; then
+            sudo /usr/bin/install -m 0440 -o root -g wheel "$tmp" "/etc/sudoers.d/$name" \
+                && grn "  /etc/sudoers.d/$name"
+        else
+            fail "generated /etc/sudoers.d/$name failed visudo — not installed"
+        fi
+        rm -f "$tmp"
+    done
+fi
+
+# ---- warp -------------------------------------------------------------------
+if want warp; then
+    hdr "Cloudflare WARP"
+    WARP=/usr/local/bin/warp-cli
+    if [ ! -x "$WARP" ]; then
+        fail "warp-cli not found (install the cloudflare-warp cask: run with the deps component)"
+    else
+        # Wait for the daemon a fresh install starts.
+        for _ in 1 2 3 4 5 6 7 8 9 10; do "$WARP" --accept-tos status >/dev/null 2>&1 && break; sleep 2; done
+        # WARP auto-updates delete the registration and reset the mode — this
+        # is the same repair, and a no-op when it is already right.
+        if "$WARP" --accept-tos registration show >/dev/null 2>&1; then
+            grn "  registration present"
+        else
+            ylw "  no registration — creating a free consumer registration"
+            "$WARP" --accept-tos registration new || fail "warp-cli registration new"
+        fi
+        "$WARP" --accept-tos mode tunnel_only            >/dev/null || fail "warp-cli mode tunnel_only"
+        "$WARP" --accept-tos tunnel protocol set MASQUE  >/dev/null || fail "warp-cli tunnel protocol set MASQUE"
+        if scutil --nc list 2>/dev/null | grep -i proton | grep -q Connected; then
+            ylw "  ProtonVPN is connected — leaving WARP disconnected (they cannot run together)"
+        else
+            "$WARP" --accept-tos connect >/dev/null
+            sleep 4
+            trace=$(curl -s -m 8 https://www.cloudflare.com/cdn-cgi/trace | grep '^warp=')
+            [ "$trace" = "warp=on" ] && grn "  connected: $trace" || ylw "  connect issued; trace says: ${trace:-unreachable}"
+        fi
+    fi
+fi
+
+# ---- killswitch (+ xbar menu) -------------------------------------------------
+if want killswitch; then
+    hdr "warp-killswitch + xbar menu"
+    # The killswitch installer writes the menu plugin only where the folders exist.
+    mkdir -p "$HOME/Library/Application Support/xbar/plugins" "$HOME/Documents/SwiftBar"
+    sudo bash "$C/warp-killswitch/install.sh" --user "$USER" || fail "warp-killswitch install"
+    [ -d /Applications/xbar.app ] && { pgrep -x xbar >/dev/null || open -g -a xbar; }
+fi
+
+# ---- netfix -----------------------------------------------------------------
+if want netfix; then
+    hdr "macOS 27 ARP-cache workaround"
+    # Installs only when detect.sh measures the defect on this machine.
+    /bin/sh "$C/macos27-netfix/install.sh" || fail "macos27-netfix install (see output above)"
+fi
+
+# ---- netwatch ---------------------------------------------------------------
+if want netwatch; then
+    hdr "netwatch"
+    [ -x "$BREW_PREFIX/bin/bash" ] || fail "Homebrew bash missing — netwatch needs bash >= 4"
+    put_bash4 "$C/netwatch/netwatch" "$BIN/netwatch"
+    put_bash4 "$C/netwatch/nettop"   "$BIN/nettop"
+    mkdir -p "$HOME/.local/share/netwatch" "$HOME/Library/LaunchAgents"
+    PL="$HOME/Library/LaunchAgents/com.netwatch.plist"
+    tmp=$(mktemp)
+    sed -e "s|@BASH@|$BREW_PREFIX/bin/bash|" -e "s|@HOME@|$HOME|g" "$C/netwatch/com.netwatch.plist.in" > "$tmp"
+    plutil -lint "$tmp" >/dev/null || fail "generated com.netwatch.plist is invalid"
+    put "$tmp" "$PL" 644; rm -f "$tmp"
+    launchctl bootout "gui/$(id -u)/com.netwatch" 2>/dev/null
+    launchctl bootstrap "gui/$(id -u)" "$PL" && grn "  com.netwatch loaded" || fail "launchctl bootstrap com.netwatch"
+    grn "  $BIN/netwatch, $BIN/nettop"
+fi
+
+# ---- netcheck ---------------------------------------------------------------
+if want netcheck; then
+    hdr "netcheck"
+    put_bash4 "$C/netcheck/netcheck" "$BIN/netcheck" && grn "  $BIN/netcheck"
+fi
+
+# ---- probesource ------------------------------------------------------------
+if want probesource; then
+    hdr "probesource"
+    bash "$C/probesource/install.sh" --no-deps </dev/null || fail "probesource install"
+fi
+
+# ---- shell ------------------------------------------------------------------
+if want shell; then
+    hdr "zsh: checkdns + network aliases"
+    put "$C/checkdns/checkdns.zsh"        "$SHELL_DIR/checkdns.zsh" 644
+    put "$C/checkdns/network-aliases.zsh" "$SHELL_DIR/network-aliases.zsh" 644
+    MARK="# >>> macOS-SecureNetwork-Suite >>>"
+    if grep -qF "$MARK" "$HOME/.zshrc" 2>/dev/null; then
+        grn "  ~/.zshrc already sources the suite"
+    elif grep -q '^checkdns()' "$HOME/.zshrc" 2>/dev/null; then
+        ylw "  ~/.zshrc already defines checkdns() itself — not adding a second copy."
+        ylw "  (files are in $SHELL_DIR if you want to switch to sourcing them)"
+    else
+        {
+            echo ""
+            echo "$MARK"
+            echo "for _f in \"$SHELL_DIR\"/*.zsh(N); do source \"\$_f\"; done; unset _f"
+            echo "# <<< macOS-SecureNetwork-Suite <<<"
+        } >> "$HOME/.zshrc"
+        grn "  added source block to ~/.zshrc (open a new shell)"
+    fi
+    case ":$PATH:" in *":$BIN:"*) ;; *) ylw "  NOTE: $BIN is not on PATH — add: export PATH=\"$BIN:\$PATH\"" ;; esac
+fi
+
+# ---- profiles ---------------------------------------------------------------
+if want profiles; then
+    hdr "DoH configuration profiles"
+    installed=$(sudo /usr/bin/profiles show -type configuration 2>/dev/null)
+    for p in AdGuard-DoH chrome-doh-policy; do
+        f="$C/profiles/$p.mobileconfig"
+        id=$(/usr/libexec/PlistBuddy -c 'Print :PayloadIdentifier' "$f")
+        if printf '%s' "$installed" | grep -qF "$id"; then
+            grn "  $p installed ($id)"
+        else
+            open "$f"
+            ylw "  $p queued — approve it in System Settings › General › Device Management"
+        fi
+    done
+fi
+
+# ---- firefox ----------------------------------------------------------------
+if want firefox; then
+    hdr "Firefox user.js"
+    FF="$HOME/Library/Application Support/Firefox/Profiles"
+    if [ ! -d "$FF" ]; then
+        ylw "  no Firefox profiles — skipped"
+    else
+        FMARK="// >>> macOS-SecureNetwork-Suite >>>"
+        for prof in "$FF"/*/; do
+            uj="${prof}user.js"
+            if grep -qF "$FMARK" "$uj" 2>/dev/null || grep -qF 'network.trr.uri' "$uj" 2>/dev/null; then
+                grn "  $(basename "$prof"): already configured"
+            else
+                { echo "$FMARK"; cat "$C/firefox/user.js"; echo "// <<< macOS-SecureNetwork-Suite <<<"; } >> "$uj"
+                grn "  $(basename "$prof"): user.js updated (restart Firefox)"
+            fi
+        done
+    fi
+fi
+
+# ---- summary ----------------------------------------------------------------
+hdr "Verify"
+[ -x /usr/local/bin/warp-killswitch ] && sudo /usr/local/bin/warp-killswitch status 2>/dev/null | sed 's/^/  /'
+[ -f "$HOME/Library/LaunchAgents/com.netwatch.arpcache.plist" ] && /bin/sh "$C/macos27-netfix/verify.sh" | sed 's/^/  /'
+echo
+if [ -n "$FAILED" ]; then
+    red "Finished with problems:"; printf "$FAILED\n"; exit 1
+fi
+grn "macOS-SecureNetwork-Suite installed."
+echo "  Menu bar: xbar › Security Toggle     CLI: netcheck · checkdns · nettop · probesource"

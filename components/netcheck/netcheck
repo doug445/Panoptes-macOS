@@ -1,0 +1,336 @@
+#!/opt/homebrew/bin/bash
+# netcheck (macOS) — one-shot network security status report
+set -euo pipefail
+
+# --- macOS 27 ARP-table workaround ------------------------------------------
+# A process forked by a non-Apple-signed binary (Homebrew bash) gets an EMPTY
+# ARP table. Read direct first so this still works when run by hand from zsh
+# and on unaffected machines; fall back to the cache published by the
+# com.netwatch.arpcache LaunchAgent. See components/macos27-netfix in macOS-SecureNetwork-Suite.
+ARP_CACHE="${HOME}/.local/share/netwatch/arp.cache"
+ARP_CACHE_MAX_AGE=120
+arp_stale_warned=0
+
+arp_table() {
+    local direct now mtime age
+    direct=$(arp -an 2>/dev/null || true)
+    if [[ -n "$direct" ]]; then
+        printf '%s\n' "$direct"
+        return 0
+    fi
+
+    [[ -r "$ARP_CACHE" ]] || {
+        if (( arp_stale_warned == 0 )); then
+            printf '%s\n' "warning: ARP table unreadable and no cache at $ARP_CACHE" >&2
+            printf '%s\n' "         run the suite installer (component: macos27-netfix)" >&2
+            arp_stale_warned=1
+        fi
+        return 0
+    }
+
+    # A stale cache is worse than none: it reports pre-change data and can mask
+    # the very thing these tools look for. Refuse it, and say so.
+    now=$(date +%s)
+    mtime=$(stat -f %m "$ARP_CACHE" 2>/dev/null || echo 0)
+    age=$(( now - mtime ))
+    if (( age > ARP_CACHE_MAX_AGE )); then
+        if (( arp_stale_warned == 0 )); then
+            printf '%s\n' "warning: ARP cache is ${age}s stale — results incomplete" >&2
+            arp_stale_warned=1
+        fi
+        return 0
+    fi
+
+    arp_stale_warned=0
+    cat "$ARP_CACHE" 2>/dev/null || true
+}
+
+# Resolve one MAC from the table (replaces `arp -n "$ip" | awk ...`).
+arp_mac_for_ip() {
+    local ip="$1"
+    arp_table | awk -v want="($ip)" '
+        $2 == want {
+            for (i = 1; i <= NF; i++)
+                if ($i ~ /^[0-9a-f][0-9a-f]?(:[0-9a-f][0-9a-f]?){5}$/) { print $i; exit }
+        }
+    ' || true
+}
+# --- end ARP-table workaround -----------------------------------------------
+
+
+BOLD='\033[1m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+section() { echo -e "\n${BOLD}${CYAN}━━━ $1 ━━━${NC}"; }
+
+ALF="/usr/libexec/ApplicationFirewall/socketfilterfw"
+
+# Firewall
+section "APPLICATION FIREWALL"
+if [[ -x "$ALF" ]]; then
+    gs=$("$ALF" --getglobalstate 2>/dev/null | tail -1)
+    sm=$("$ALF" --getstealthmode 2>/dev/null | tail -1)
+    bl=$("$ALF" --getblockall 2>/dev/null | tail -1)
+
+    for v in "$gs" "$sm" "$bl"; do
+        if [[ "$v" == *"enabled"* ]] || [[ "$v" == *"ON"* ]] || [[ "$v" == *" on"* ]] || [[ "$v" == *"blocking all"* ]]; then
+            echo -e "  ${GREEN}●${NC} $v"
+        else
+            echo -e "  ${RED}●${NC} $v"
+        fi
+    done
+else
+    echo -e "  ${RED}socketfilterfw not found at $ALF${NC}"
+fi
+
+# Listening ports
+section "LISTENING PORTS"
+if command -v lsof &>/dev/null; then
+    {
+        lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null
+        lsof -iUDP -nP 2>/dev/null | grep -vF -- "->"
+    } | awk 'NR>1 && !/^COMMAND/' | while read -r cmd pid user fd type dev sz prot addr rest; do
+        port="${addr##*:}"
+        host="${addr%:*}"
+        if [[ "$host" == "127.0.0.1" ]] || [[ "$host" == "[::1]" ]] || [[ "$host" == "localhost" ]]; then
+            echo -e "  ${GREEN}●${NC} ${addr} (localhost only) ${cmd}"
+        else
+            echo -e "  ${YELLOW}●${NC} ${addr} (network exposed — ALF still protects) ${cmd}"
+        fi
+    done
+else
+    echo -e "  ${YELLOW}lsof not available${NC}"
+fi
+
+# WARP
+section "WARP TUNNEL"
+if command -v warp-cli &>/dev/null; then
+    warp_status=$(warp-cli --accept-tos status 2>/dev/null | grep -i "Status update:" | awk '{print $3}' || true)
+    if [[ "$warp_status" == "Connected" ]]; then
+        echo -e "  Status: ${GREEN}Connected${NC}"
+        warp-cli --accept-tos tunnel stats 2>/dev/null | grep -E "Protocol|latency|loss" | sed 's/^/  /' || true
+        # Verify traffic actually flows through WARP
+        warp_active=$(curl -s --max-time 3 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | awk -F= '/^warp=/{print $2}' || true)
+        if [[ "$warp_active" == "on" ]]; then
+            echo -e "  Exit check:  ${GREEN}warp=on${NC} (traffic is tunneled)"
+        elif [[ -n "$warp_active" ]]; then
+            echo -e "  Exit check:  ${RED}warp=${warp_active}${NC} (tunnel not being used!)"
+        fi
+        split=$(warp-cli --accept-tos tunnel host list 2>/dev/null | tail -n +2 | wc -l | tr -d ' ' || true)
+        (( split > 0 )) && echo -e "  Split-tunnel exclusions: ${YELLOW}${split} host(s)${NC} (run: warp-cli tunnel host list)"
+    else
+        echo -e "  Status: ${RED}${warp_status:-Unknown}${NC}"
+    fi
+else
+    echo -e "  ${YELLOW}warp-cli not installed${NC}  — install: https://pkg.cloudflareclient.com/"
+fi
+
+# DNS
+section "DNS"
+wifi_iface=$(networksetup -listallhardwareports 2>/dev/null | awk '/Hardware Port: Wi-Fi/{getline;print $2;exit}')
+
+# Primary resolver from scutil
+echo -e "  ${BOLD}Active resolvers (scutil):${NC}"
+scutil --dns 2>/dev/null | awk '/^resolver #1/,/^$/' | grep -E "nameserver|search domain|flags" | head -6 | sed 's/^/    /' || true
+
+# Wi-Fi DNS override (if any set via networksetup)
+if [[ -n "$wifi_iface" ]]; then
+    echo ""
+    echo -e "  ${BOLD}Wi-Fi service DNS override:${NC}"
+    wifi_dns=$(networksetup -getdnsservers Wi-Fi 2>/dev/null)
+    if [[ "$wifi_dns" == *"There aren't any DNS Servers set"* ]]; then
+        echo -e "    ${YELLOW}(none — using DHCP-provided DNS)${NC}"
+    else
+        echo "$wifi_dns" | sed 's/^/    /'
+    fi
+fi
+
+# DoT/DoH via configuration profile (macOS 11+)
+echo ""
+echo -e "  ${BOLD}Encrypted DNS profile:${NC}"
+if command -v profiles &>/dev/null; then
+    dns_profile=$(sudo profiles show -type configuration 2>/dev/null | grep -iE "DNSSettings|DNSProtocol" | head -3 || true)
+    if [[ -n "$dns_profile" ]]; then
+        echo -e "    ${GREEN}Encrypted DNS profile installed${NC}"
+        echo "$dns_profile" | sed 's/^/    /'
+    else
+        echo -e "    ${YELLOW}no DoT/DoH profile detected${NC}"
+        echo -e "    (macOS needs a .mobileconfig profile for system-wide DoT/DoH)"
+    fi
+else
+    echo -e "    ${YELLOW}profiles command unavailable${NC}"
+fi
+
+# Test DNS actually resolves via encrypted channel (best-effort)
+echo ""
+echo -e "  ${BOLD}Resolution test:${NC}"
+if command -v dig &>/dev/null; then
+    dig_result=$(dig +short +time=2 +tries=1 cloudflare.com 2>/dev/null | head -1)
+    [[ -n "$dig_result" ]] && echo -e "    cloudflare.com → ${GREEN}${dig_result}${NC}" \
+                           || echo -e "    ${RED}dig failed${NC}"
+fi
+
+# ARP — prefer arp-scan (active scan + vendor lookup), fall back to system arp
+section "ARP TABLE"
+gateway_ip=$(route -n get default 2>/dev/null | awk '/gateway:/{print $2; exit}' || true)
+
+arp_output=""
+if command -v arp-scan &>/dev/null; then
+    arp_output=$(sudo arp-scan --interface="$wifi_iface" --localnet --ignoredups 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n || true)
+fi
+
+if [[ -n "$arp_output" ]]; then
+    while IFS=$'\t' read -r ip mac vendor; do
+        if [[ "$ip" == "$gateway_ip" ]]; then
+            echo -e "  ${BOLD}${ip}${NC}\t${mac}\t${vendor} ${YELLOW}(gateway)${NC}"
+        else
+            echo -e "  ${ip}\t${mac}\t${vendor}"
+        fi
+    done <<< "$arp_output"
+else
+    # Fallback: system arp
+    arp_table | while read -r line; do
+        if [[ "$line" == *"($gateway_ip)"* ]]; then
+            echo -e "  ${BOLD}${line}${NC}  ← gateway"
+        else
+            echo "  $line"
+        fi
+    done
+fi
+
+# Recent drops
+section "RECENT FIREWALL DROPS (last 5 min)"
+drop_lines=$(/usr/bin/log show --predicate 'eventMessage CONTAINS "Stealth Mode connection attempt"' --last 5m --style syslog 2>/dev/null | grep "kernel.*Stealth Mode connection attempt" || true)
+if [[ -n "$drop_lines" ]]; then
+    drops=$(echo "$drop_lines" | wc -l | tr -d ' ')
+    echo -e "  ${YELLOW}${drops} blocks in the last 5 minutes${NC}"
+    echo "$drop_lines" | tail -5 | sed 's/^/    /'
+else
+    echo -e "  ${GREEN}No recent blocks — quiet network${NC}"
+fi
+
+# Top drop sources — parse unified log (same source as "recent drops" above), enrich with MAC/vendor/rDNS
+section "TOP DROP SOURCES"
+OUI=""
+for cand in /opt/homebrew/share/hwdata/oui.txt /usr/local/share/hwdata/oui.txt /opt/homebrew/share/nmap/nmap-mac-prefixes; do
+    [[ -r "$cand" ]] && { OUI="$cand"; break; }
+done
+
+drop_ips=""
+if [[ -n "$drop_lines" ]]; then
+    drop_ips=$(echo "$drop_lines" | grep -oE 'from [0-9.]+:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | sort | uniq -c | sort -rn | head -10)
+fi
+
+if [[ -z "$drop_ips" ]]; then
+    NW_LOG="${HOME}/.local/share/netwatch/events.log"
+    if [[ -r "$NW_LOG" ]] && grep -q DROP "$NW_LOG" 2>/dev/null; then
+        drop_ips=$(grep DROP "$NW_LOG" | awk -F'src=' 'NF>1{print $2}' | awk '{print $1}' | sort | uniq -c | sort -rn | head -10)
+        echo -e "  ${YELLOW}(from netwatch events.log — unified log had no drops)${NC}"
+    fi
+fi
+
+if [[ -n "$drop_ips" ]]; then
+    declare -A lan_mac lan_vendor
+    if command -v arp-scan &>/dev/null; then
+        while IFS=$'\t' read -r sip smac svendor; do
+            [[ -n "$sip" ]] || continue
+            lan_mac[$sip]="$smac"
+            lan_vendor[$sip]="$svendor"
+        done < <(sudo arp-scan --interface="$wifi_iface" --localnet --ignoredups 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+    fi
+    echo "$drop_ips" | while read -r count ip; do
+        [[ -z "$ip" ]] && continue
+        mac="${lan_mac[$ip]:-}"
+        vendor="${lan_vendor[$ip]:-}"
+        if [[ -z "$mac" ]]; then
+            mac=$(arp_mac_for_ip "$ip")
+            [[ "$mac" == "(incomplete)" ]] && mac=""
+        fi
+        if [[ -z "$vendor" && -n "$mac" && -r "$OUI" ]]; then
+            prefix=$(echo "${mac:0:8}" | tr -d : | tr 'a-f' 'A-F')
+            vendor=$(grep "^$prefix" "$OUI" 2>/dev/null | head -1 | sed -e 's/^[0-9A-F]*[[:space:]]*(base 16)[[:space:]]*//' -e 's/^[0-9A-F]*[[:space:]]\{1,\}//' | tr -d '\r' || true)
+        fi
+        if [[ -z "$vendor" && -z "$mac" ]]; then
+            vendor=$(whois "$ip" 2>/dev/null | awk -F: '/^OrgName|^org-name|^netname/{gsub(/^[[:space:]]+/,"",$2); print $2; exit}' || true)
+        fi
+        host=$(dig +short +time=1 +tries=1 -x "$ip" 2>/dev/null | head -1 | sed 's/\.$//' || true)
+        printf "  %6s  %-15s  %-18s  %-28s  %s\n" "$count" "$ip" "${mac:--}" "${vendor:--}" "${host:-}"
+    done
+else
+    echo -e "  ${GREEN}No drops detected${NC}"
+fi
+
+# NetWatch service
+section "NETWATCH MONITOR"
+if launchctl list 2>/dev/null | grep -q "com.netwatch"; then
+    echo -e "  ${GREEN}Running${NC} (launchd)"
+    if [[ -f "${HOME}/.local/share/netwatch/events.log" ]]; then
+        events=$(wc -l < "${HOME}/.local/share/netwatch/events.log")
+        echo -e "  ${events} events logged"
+        tail -3 "${HOME}/.local/share/netwatch/events.log" | sed 's/^/  /'
+    fi
+else
+    echo -e "  ${RED}Not loaded${NC} — load with: launchctl load ~/Library/LaunchAgents/com.netwatch.plist"
+fi
+
+# Wi-Fi MAC randomization
+section "WI-FI PRIVACY (MAC randomization)"
+if [[ -n "$wifi_iface" ]]; then
+    current_mac=$(ifconfig "$wifi_iface" 2>/dev/null | awk '/ether/{print $2; exit}')
+    hw_mac=$(networksetup -listallhardwareports 2>/dev/null | awk '/Hardware Port: Wi-Fi/{getline;getline;print $3;exit}')
+    echo -e "  Current Wi-Fi MAC: ${BOLD}${current_mac}${NC} (${wifi_iface})"
+    [[ -n "$hw_mac" ]] && echo -e "  Hardware MAC:      ${BOLD}${hw_mac}${NC}"
+
+    # Check the "locally administered" bit (bit 0x02 of the first octet).
+    # If set → MAC is NOT the burned-in hardware MAC → Private Wi-Fi Address is active.
+    if [[ -n "$current_mac" ]]; then
+        first_octet=$(echo "$current_mac" | cut -d: -f1)
+        # Convert hex to decimal, check bit 0x02
+        first_dec=$((16#${first_octet}))
+        if (( first_dec & 0x02 )); then
+            echo -e "  Status: ${GREEN}Locally Administered${NC} — Private Wi-Fi Address is active"
+        else
+            echo -e "  Status: ${RED}Universal (hardware MAC exposed)${NC}"
+            echo -e "  ${YELLOW}!${NC} Enable: System Settings → Wi-Fi → (network) → Details → Private Wi-Fi Address = Rotating"
+        fi
+    fi
+
+    # Current SSID (since MAC randomization is per-network)
+    current_ssid=$(networksetup -getairportnetwork "$wifi_iface" 2>/dev/null | sed -n 's/^Current Wi-Fi Network: //p')
+    [[ -n "$current_ssid" ]] && echo -e "  Network: ${current_ssid}"
+else
+    echo -e "  ${YELLOW}Wi-Fi interface not detected${NC}"
+fi
+
+# IP addresses — macOS equivalent of `ip --brief addr`
+section "IP ADDRESSES"
+echo -e "  ${BOLD}Interface        State  Address${NC}"
+ifconfig -lu 2>/dev/null | tr ' ' '\n' | while read -r iface; do
+    addr=$(ifconfig "$iface" 2>/dev/null | awk '/inet / && !/127.0.0.1/{print $2}')
+    addr6=$(ifconfig "$iface" 2>/dev/null | awk '/inet6/ && !/fe80/{print $2}' | head -1)
+    [[ -z "$addr" && -z "$addr6" ]] && continue
+    flags=$(ifconfig "$iface" 2>/dev/null | head -1)
+    if [[ "$flags" == *"UP"*"RUNNING"* ]]; then
+        state="UP"; scolor="$GREEN"
+    elif [[ "$flags" == *"UP"* ]]; then
+        state="UP?"; scolor="$YELLOW"
+    else
+        state="DOWN"; scolor="$RED"
+    fi
+    combined="${addr:+$addr}${addr:+${addr6:+, }}${addr6:+$addr6}"
+    printf "  \033[38;5;129m%-16s${NC} ${scolor}%-6s${NC} %s\n" "$iface" "$state" "$combined"
+done
+
+echo ""
+echo -e "  ${BOLD}Public IP:${NC}"
+pub4=$(curl -4 -s --max-time 3 https://ifconfig.me 2>/dev/null || true)
+pub6=$(curl -6 -s --max-time 3 https://ifconfig.me 2>/dev/null || true)
+[[ -n "$pub4" ]] && echo -e "    IPv4: ${pub4}"
+[[ -n "$pub6" ]] && echo -e "    IPv6: ${pub6}"
+[[ -z "$pub4" && -z "$pub6" ]] && echo -e "    ${RED}unreachable${NC}"
+
+echo ""

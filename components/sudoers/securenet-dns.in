@@ -1,0 +1,3 @@
+# macOS-SecureNetwork-Suite — xbar menu: AdGuard DNS toggle and DNS-cache flush
+# without a password prompt. Apple binaries only.
+@USER@ ALL=(root) NOPASSWD: /usr/sbin/networksetup -setdnsservers *, /usr/bin/killall -HUP mDNSResponder

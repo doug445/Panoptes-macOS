@@ -1,0 +1,397 @@
+#!/opt/homebrew/bin/bash
+# netwatch (macOS) — monitor Application Firewall blocks, send native notifications
+# Relies on:
+#   - macOS Application Firewall with stealth mode + logging enabled
+#   - Log file at /var/log/appfirewall.log
+#   - osascript (built-in) for notifications; terminal-notifier used if present
+
+set -euo pipefail
+
+LOG_DIR="${HOME}/.local/share/netwatch"
+LOG_FILE="${LOG_DIR}/events.log"
+POLL_INTERVAL=10
+ALERT_THRESHOLD=5
+ALERT_WINDOW=60
+SUMMARY_INTERVAL=300
+NOTIFY_EXPIRE=15
+ARP_CACHE="${HOME}/.local/share/netwatch/arp.cache"
+ARP_CACHE_MAX_AGE=120
+arp_stale_warned=0
+
+mkdir -p "$LOG_DIR"
+
+# Without this, any `set -e` death is silent and launchd just respawns us on
+# ThrottleInterval — an endless "NetWatch Active" notification loop with no
+# trace of why. Record the failing line before we go.
+trap 'rc=$?; printf "[%s] FATAL exit=%s at line %s: %s\n" \
+    "$(date "+%Y-%m-%d %H:%M:%S")" "$rc" "$LINENO" "$BASH_COMMAND" \
+    >> "${LOG_DIR}/events.log"' ERR
+
+# Notification helper — uses terminal-notifier if installed, else osascript.
+notify() {
+    local urgency="$1" title="$2" body="$3"
+    local display_title="$title"
+    [[ "$urgency" == "critical" ]] && display_title="⚠ $title"
+
+    if command -v terminal-notifier &>/dev/null; then
+        terminal-notifier -title "NetWatch" -subtitle "$display_title" \
+            -message "$body" -group "netwatch" -timeout "$NOTIFY_EXPIRE" \
+            -sender com.apple.Terminal 2>/dev/null || true
+    else
+        # osascript notification — no icon, no timeout control, but always available.
+        local esc_body esc_title
+        esc_body=$(printf '%s' "$body" | sed 's/"/\\"/g')
+        esc_title=$(printf '%s' "$display_title" | sed 's/"/\\"/g')
+        osascript -e "display notification \"${esc_body}\" with title \"NetWatch\" subtitle \"${esc_title}\"" 2>/dev/null || true
+    fi
+}
+
+log_event() {
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$ts] $1" >> "$LOG_FILE"
+}
+
+# Per-IP tracking
+declare -A ip_counts
+declare -A ip_first_seen
+declare -A ip_alerted
+last_summary=0
+total_drops=0
+unique_ips=0
+
+reset_counters() {
+    ip_counts=()
+    ip_first_seen=()
+    ip_alerted=()
+    total_drops=0
+    unique_ips=0
+}
+
+process_drop() {
+    local src_ip="$1" proto="$2" dpt="$3"
+    local now
+    now=$(date +%s)
+
+    for ip in "${!ip_first_seen[@]}"; do
+        if (( now - ip_first_seen[$ip] > ALERT_WINDOW )); then
+            unset "ip_counts[$ip]" "ip_first_seen[$ip]" "ip_alerted[$ip]"
+        fi
+    done
+
+    if [[ -z "${ip_counts[$src_ip]:-}" ]]; then
+        ip_counts[$src_ip]=0
+        ip_first_seen[$src_ip]=$now
+        (( unique_ips++ )) || true
+    fi
+    (( ip_counts[$src_ip]++ )) || true
+    (( total_drops++ )) || true
+
+    log_event "DROP src=$src_ip proto=$proto dpt=$dpt"
+
+    if (( ip_counts[$src_ip] >= ALERT_THRESHOLD )) && [[ -z "${ip_alerted[$src_ip]:-}" ]]; then
+        ip_alerted[$src_ip]=1
+        notify critical "Port Scan Detected" "Source: $src_ip — ${ip_counts[$src_ip]} probes in ${ALERT_WINDOW}s (${proto}/${dpt})"
+        log_event "ALERT port_scan src=$src_ip count=${ip_counts[$src_ip]}"
+    fi
+}
+
+# Get default gateway IP (macOS: route -n get default)
+get_gateway_ip() {
+    { route -n get default 2>/dev/null || true; } \
+        | awk '/gateway:/{print $2; exit}' || true
+}
+
+# Resolve MAC for an IP via ARP table (macOS: arp -n <ip>)
+# On Darwin 27 a process forked by a non-Apple-signed binary (this script's
+# /opt/homebrew/bin/bash) gets an EMPTY ARP table. Read direct first — correct
+# when run by hand from zsh, and on unaffected machines — then fall back to the
+# cache published by the com.netwatch.arpcache LaunchAgent.
+# See components/macos27-netfix in macOS-SecureNetwork-Suite.
+arp_table() {
+    local direct now mtime age
+    direct=$(arp -an 2>/dev/null || true)
+    if [[ -n "$direct" ]]; then
+        printf '%s\n' "$direct"
+        return 0
+    fi
+
+    [[ -r "$ARP_CACHE" ]] || return 0
+
+    # A stale cache reports the PRE-ATTACK gateway MAC and would mask the exact
+    # spoofing this monitor exists to catch. Refuse it, and say so.
+    now=$(date +%s)
+    mtime=$(stat -f %m "$ARP_CACHE" 2>/dev/null || echo 0)
+    age=$(( now - mtime ))
+    if (( age > ARP_CACHE_MAX_AGE )); then
+        if (( arp_stale_warned == 0 )); then
+            log_event "WARN arp cache stale (${age}s) — is com.netwatch.arpcache loaded?"
+            notify critical "Degraded" "ARP cache is ${age}s stale — MAC checks are not running."
+            arp_stale_warned=1
+        fi
+        return 0
+    fi
+
+    arp_stale_warned=0
+    cat "$ARP_CACHE" 2>/dev/null || true
+}
+
+get_mac_for_ip() {
+    local ip="$1"
+    arp_table | awk -v want="($ip)" '
+        {
+            for (i = 1; i < NF - 1; i++) {
+                if ($i == want && $(i + 1) == "at" && $(i + 2) ~ /:/) {
+                    print $(i + 2)
+                    exit
+                }
+            }
+        }
+    ' || true
+}
+
+# Default router's IPv6 link-local, via `ndp -rn`. Unlike arp, ndp still
+# reports data under this script's interpreter (see get_mac_for_ip). Skips
+# tunnel interfaces so a VPN's router can't masquerade as the LAN gateway.
+get_gateway_ll() {
+    { ndp -rn 2>/dev/null || true; } | awk '
+        /^fe80::/ && $0 !~ /if=(utun|ipsec|lo|awdl|llw)/ {
+            sub(/%.*/, "", $1)
+            if ($1 != "fe80::") { print $1; exit }
+        }
+    ' || true
+}
+
+# Decode an EUI-64 link-local into the MAC it was derived from:
+#   fe80::a8bb:ccff:fedd:eeff -> aa:bb:cc:dd:ee:ff
+# (strip the ff:fe filler, flip the universal/local bit in the first octet).
+# Silently yields nothing for privacy/random addresses, which carry no MAC.
+ll_to_mac() {
+    local ll="${1%%\%*}" suffix b=() i
+    local -a g
+    [[ "$ll" == fe80::* ]] || return 0
+    suffix="${ll#fe80::}"
+    IFS=':' read -r -a g <<< "$suffix"
+    (( ${#g[@]} == 4 )) || return 0
+    for i in 0 1 2 3; do
+        g[$i]="0000${g[$i]}"
+        g[$i]="${g[$i]: -4}"
+    done
+    [[ "${g[1]: -2}" == "ff" && "${g[2]:0:2}" == "fe" ]] || return 0
+    b[0]=$(( 0x${g[0]:0:2} ^ 0x02 ))
+    b[1]=$(( 0x${g[0]:2:2} ))
+    b[2]=$(( 0x${g[1]:0:2} ))
+    b[3]=$(( 0x${g[2]:2:2} ))
+    b[4]=$(( 0x${g[3]:0:2} ))
+    b[5]=$(( 0x${g[3]:2:2} ))
+    printf '%02x:%02x:%02x:%02x:%02x:%02x' \
+        "${b[0]}" "${b[1]}" "${b[2]}" "${b[3]}" "${b[4]}" "${b[5]}"
+}
+
+# `arp` prints octets unpadded (aa:bb:cc:d:e:f) while ll_to_mac() pads them
+# (aa:bb:cc:0d:0e:0f). Same address, two spellings — comparing them raw would
+# fire a spoofing alert every time the source switched. Canonicalise to padded.
+norm_mac() {
+    local m="$1" o out="" pad
+    local -a parts
+    [[ -z "$m" ]] && return 0
+    IFS=':' read -r -a parts <<< "$m"
+    (( ${#parts[@]} == 6 )) || { printf '%s' "$m"; return 0; }
+    for o in "${parts[@]}"; do
+        [[ "$o" =~ ^[0-9a-fA-F]{1,2}$ ]] || { printf '%s' "$m"; return 0; }
+        printf -v pad '%02x' "$((16#$o))"
+        [[ -n "$out" ]] && out="${out}:"
+        out="${out}${pad}"
+    done
+    printf '%s' "$out"
+}
+
+# BSSID of the associated AP — catches an evil twin (same SSID, different radio).
+get_bssid() {
+    local iface
+    iface=$(get_wifi_iface) || true
+    [[ -z "$iface" ]] && return 0
+    { ipconfig getsummary "$iface" 2>/dev/null || true; } \
+        | awk -F' : ' '/^[[:space:]]*BSSID[[:space:]]*:/ {print $2; exit}' || true
+}
+
+# Get current Wi-Fi SSID (macOS: networksetup -getairportnetwork en0)
+# Wi-Fi interface is usually en0 or en1; detect dynamically.
+get_wifi_iface() {
+    { networksetup -listallhardwareports 2>/dev/null || true; } | awk '
+        /Hardware Port: Wi-Fi/ { getline; print $2; exit }
+    ' || true
+}
+
+get_current_ssid() {
+    local iface ssid
+    iface=$(get_wifi_iface) || true
+    [[ -z "$iface" ]] && return 0
+
+    # Primary: ipconfig — unlike networksetup it is not Location-gated.
+    ssid=$({ ipconfig getsummary "$iface" 2>/dev/null || true; } \
+        | awk -F' : ' '/^[[:space:]]*SSID[[:space:]]*:/ {print $2; exit}' || true)
+
+    if [[ -z "$ssid" ]]; then
+        ssid=$({ networksetup -getairportnetwork "$iface" 2>/dev/null || true; } \
+            | sed -n 's/^Current Wi-Fi Network: //p' || true)
+    fi
+
+    printf '%s' "$ssid"
+}
+
+# A gateway's IP staying put while its layer-2 identity changes is the actual
+# signature of ARP spoofing / an evil twin. Comparing the MAC alone produced
+# only false positives: moving between networks changed the MAC legitimately.
+# So baseline the whole identity and alert only on an L2 change *within* one
+# network.
+check_gateway_identity() {
+    local ssid gw_ip gw_ll gw_mac bssid fp stored
+    gw_ip=$(get_gateway_ip)
+    [[ -z "$gw_ip" ]] && return 0
+
+    ssid=$(get_current_ssid)
+    gw_ll=$(get_gateway_ll)
+    gw_mac=$(get_mac_for_ip "$gw_ip")
+    [[ -z "$gw_mac" ]] && gw_mac=$(ll_to_mac "$gw_ll")
+    gw_mac=$(norm_mac "$gw_mac")
+    bssid=$(norm_mac "$(get_bssid)")
+
+    # Nothing to compare on: no L2 identity available at all.
+    [[ -z "$gw_ll" && -z "$gw_mac" && -z "$bssid" ]] && return 0
+
+    fp="ssid=${ssid}|gw=${gw_ip}|mac=${gw_mac}|ll=${gw_ll}|bssid=${bssid}"
+    stored=$(cat "$LOG_DIR/net_identity" 2>/dev/null || true)
+
+    if [[ -z "$stored" ]]; then
+        echo "$fp" > "$LOG_DIR/net_identity"
+        log_event "IDENTITY baseline $fp"
+        return 0
+    fi
+
+    [[ "$fp" == "$stored" ]] && return 0
+
+    # Different network (SSID or gateway IP moved) — re-baseline, don't alert.
+    if [[ "${fp%%|mac=*}" != "${stored%%|mac=*}" ]]; then
+        echo "$fp" > "$LOG_DIR/net_identity"
+        log_event "IDENTITY rebaselined (network changed) $fp"
+        return 0
+    fi
+
+    # A roam between the router's own radios (band steering, 2.4/5/6GHz) changes
+    # the BSSID several times a day with nothing wrong. Observed doing exactly
+    # that overnight on 2026-09-12, so BSSID is recorded but never alerts on its
+    # own — only the gateway's own layer-2 identity does.
+    local old_mac="${stored##*|mac=}"; old_mac="${old_mac%%|*}"
+    local old_ll="${stored##*|ll=}";   old_ll="${old_ll%%|*}"
+    local old_bssid="${stored##*|bssid=}"
+    # A baseline written before norm_mac(), or by the arp path, may be unpadded.
+    # Normalise the stored side too or the first comparison alerts on spelling.
+    old_mac=$(norm_mac "$old_mac")
+    old_bssid=$(norm_mac "$old_bssid")
+
+    local what=""
+    [[ "$gw_mac" != "$old_mac" ]] && what="gateway MAC ${old_mac:-none} -> ${gw_mac:-none}"
+    if [[ "$gw_ll" != "$old_ll" ]]; then
+        [[ -n "$what" ]] && what="$what; "
+        what="${what}gateway link-local ${old_ll:-none} -> ${gw_ll:-none}"
+    fi
+
+    if [[ -z "$what" ]]; then
+        # BSSID-only change: log the roam, stay quiet. If only the spelling
+        # differed, rewrite the canonical form without logging a non-event.
+        echo "$fp" > "$LOG_DIR/net_identity"
+        [[ "$bssid" != "$old_bssid" ]] && \
+            log_event "ROAM ap ${old_bssid:-none} -> ${bssid:-none} on ${ssid:-$gw_ip}"
+        return 0
+    fi
+
+    [[ "$bssid" != "$old_bssid" ]] && what="$what (AP also moved ${old_bssid:-none} -> ${bssid:-none})"
+
+    notify critical "Gateway Identity Changed!" \
+        "On ${ssid:-$gw_ip}: $what. Traffic may be intercepted."
+    log_event "ALERT gateway_identity $what (old: $stored / new: $fp)"
+    echo "$fp" > "$LOG_DIR/net_identity"
+}
+
+check_new_network() {
+    local current_ssid stored_ssid
+    current_ssid=$(get_current_ssid)
+    stored_ssid=$(cat "$LOG_DIR/current_ssid" 2>/dev/null || true)
+
+    if [[ "$current_ssid" != "$stored_ssid" ]] && [[ -n "$current_ssid" ]]; then
+        echo "$current_ssid" > "$LOG_DIR/current_ssid"
+        rm -f "$LOG_DIR/net_identity"
+        log_event "NETWORK changed to '$current_ssid'"
+        notify normal "Network Changed" "Connected to: $current_ssid. Monitoring started."
+    fi
+}
+
+# Noise filter — broadcast/discovery ports we don't care about
+is_noise() {
+    local src="$1" dpt="$2"
+    [[ -z "$src" || "$src" == 127.* ]] && return 0
+    case "$dpt" in
+        5353)  return 0 ;;  # mDNS
+        1900)  return 0 ;;  # SSDP/UPnP
+        137)   return 0 ;;  # NetBIOS name service
+        138)   return 0 ;;  # NetBIOS datagram
+        15600) return 0 ;;  # Samsung Smart View
+        15500) return 0 ;;  # LG Smart Share
+        3702)  return 0 ;;  # WS-Discovery
+    esac
+    return 1
+}
+
+log_event "NetWatch started (pid=$$, macOS)"
+notify normal "NetWatch Active" "Monitoring for network probes and attacks."
+check_new_network
+check_gateway_identity
+
+last_check=$(date +%s)
+last_summary=$last_check
+
+# ── Main event loop ─────────────────────────────────────────────────────
+# Single-process design: process substitution keeps the read loop in this
+# shell, so counters/arrays are shared — no subshell isolation bug.
+# Outer while-loop restarts log-stream if it dies.
+while true; do
+    exec 3< <(/usr/bin/log stream --predicate 'eventMessage CONTAINS "Stealth Mode connection attempt"' --style syslog 2>/dev/null)
+
+    while true; do
+        if read -r -t "$POLL_INTERVAL" line <&3; then
+            if [[ "$line" == *"kernel:"*"Stealth Mode connection attempt"* ]]; then
+                proto=$(echo "$line" | grep -oE 'to (TCP|UDP)' | awk '{print $2}' || true)
+                dpt=$(echo "$line" | grep -oE 'to (TCP|UDP) [0-9.]+:[0-9]+' | grep -oE '[0-9]+$' || true)
+                src_ip=$(echo "$line" | grep -oE 'from [0-9.]+:' | grep -oE '[0-9.]+' || true)
+
+                if ! is_noise "$src_ip" "$dpt"; then
+                    process_drop "$src_ip" "${proto:-?}" "${dpt:-?}"
+                fi
+            fi
+        elif (( $? > 128 )); then
+            : # timeout — fall through to periodic checks
+        else
+            # EOF — log stream died, break inner loop to restart
+            break
+        fi
+
+        now=$(date +%s)
+        if (( now - last_check >= POLL_INTERVAL )); then
+            check_gateway_identity
+            check_new_network
+            last_check=$now
+        fi
+
+        if (( total_drops > 0 && now - last_summary >= SUMMARY_INTERVAL )); then
+            notify low "NetWatch Summary" "${total_drops} blocked probes from ${unique_ips} source(s) in last ${SUMMARY_INTERVAL}s"
+            log_event "SUMMARY drops=$total_drops unique_ips=$unique_ips"
+            last_summary=$now
+            reset_counters
+        fi
+    done
+
+    exec 3<&-
+    log_event "WARN log stream exited — restarting in 10s"
+    sleep 10
+done
