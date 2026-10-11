@@ -965,8 +965,8 @@ WARP_CLI="/usr/local/bin/warp-cli"
 [ -x "$WARP_CLI" ] || WARP_CLI="$(command -v warp-cli || echo /usr/local/bin/warp-cli)"
 KILLSWITCH="/usr/local/bin/warp-killswitch"
 KILL_MARKER="/var/db/warp-killswitch/killed"
-# ProtonVPN's Network Extension service ID differs per install; look it up
-# rather than hardcoding it (override with SECURENET_PROTON_ID).
+# ProtonVPN's VPN service ID differs per install, and the service is only
+# registered while the app is running — look it up rather than hardcoding it.
 PROTON_ID="${SECURENET_PROTON_ID:-$(/usr/sbin/scutil --nc list 2>/dev/null | /usr/bin/grep -i proton | /usr/bin/grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | /usr/bin/head -1)}"
 ADGUARD_PRIMARY="94.140.14.140"
 ADGUARD_SECONDARY="94.140.14.141"
@@ -1031,12 +1031,16 @@ case "${1:-}" in
     if [[ "$(warp_status)" == "connected" ]]; then
       note "ProtonVPN blocked" "Disconnect WARP first."
     else
-      /usr/sbin/scutil --nc start "$PROTON_ID" >/dev/null 2>&1
+      if [[ -n "$PROTON_ID" ]]; then
+        /usr/sbin/scutil --nc start "$PROTON_ID" >/dev/null 2>&1
+      else
+        /usr/bin/open -g -a ProtonVPN      # app not running yet: its service appears once it starts
+      fi
       sleep 3
     fi
     ;;
   proton_off)
-    /usr/sbin/scutil --nc stop "$PROTON_ID" >/dev/null 2>&1
+    [[ -n "$PROTON_ID" ]] && /usr/sbin/scutil --nc stop "$PROTON_ID" >/dev/null 2>&1
     sleep 1
     ;;
   dns_on)
@@ -1106,9 +1110,7 @@ echo "Fallback: 9.9.9.9 + 1.1.1.1 | color=gray"
 echo "---"
 
 echo "ProtonVPN | color=white size=13"
-if [[ -z "$PROTON_ID" ]]; then
-  echo "Not configured (no ProtonVPN service in scutil --nc list) | color=gray"
-elif [[ "$P" == "connected" ]]; then
+if [[ "$P" == "connected" ]]; then
   echo "🟣 Connected | color=purple"
   echo "⏹️ Disconnect | bash='$0' param1=proton_off terminal=false refresh=true"
 elif [[ "$W" == "connected" ]]; then

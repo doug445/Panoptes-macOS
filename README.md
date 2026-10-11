@@ -54,10 +54,10 @@ Skip with `--no-deps`. Homebrew is never run as root.
 Everything is idempotent; re-running repairs drift. Files the installer
 replaces are backed up as `*.bak.<timestamp>` first.
 
-**Two steps need you:** macOS will not install configuration profiles silently
-— approve them in *System Settings › General › Device Management*. And if
-ProtonVPN has never been connected, open it once so its VPN service exists;
-the menu finds it automatically (`scutil --nc list`).
+**One step needs you:** macOS will not install configuration profiles silently
+— approve them in *System Settings › General › Device Management*. (ProtonVPN
+needs nothing: the menu looks its service up in `scutil --nc list`, and launches
+the app if it isn't running.)
 
 ## What gets installed where
 

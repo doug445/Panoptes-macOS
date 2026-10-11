@@ -56,9 +56,3 @@ xbar executes every executable file in its plugin folder, so a `*.bak` left
 there loads as a second plugin wired to old code. Keep backups outside the
 folder (the installer uses `~/Documents/SwiftBar/backups/`).
 `components/macos27-netfix/postupgrade-checks.sh` finds these.
-
-## ProtonVPN toggle says "Not configured"
-
-The menu looks the service up in `scutil --nc list`. Open ProtonVPN and connect
-once so macOS registers its VPN service, or set `SECURENET_PROTON_ID` to the
-service UUID.
