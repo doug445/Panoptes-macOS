@@ -52,6 +52,19 @@ happened to be set before the teardown.
 - Homebrew has deprecated `speedtest-cli` (disabled 2027-01-18). The `deps`
   component installs `speedtest-go` instead; the `speedtest` alias uses it.
 
+### Added
+
+- **The macOS 27 ARP-cache agent retires itself once Apple fixes the defect.**
+  `arp-cache-dump` fingerprints the macOS build, kernel and Homebrew
+  interpreters, re-runs `detect.sh` when any of them change (and daily), and
+  after three consecutive NOT AFFECTED verdicts ten minutes apart runs
+  `uninstall.sh` on itself, posts a notification and records why in
+  `~/.local/share/netwatch/selfcheck.log`. `detect.sh` reports *inconclusive*
+  rather than NOT AFFECTED when the ARP table could not be measured, so the
+  agent cannot retire on a false "fixed". `AUTO_UNINSTALL=0` opts out.
+  Tested here by driving the confirmation counter: the agent removed its own
+  LaunchAgent, helper and cache from inside the launchd job.
+
 ### Changed
 
 - **One copy of the menu.** `components/menubar/security-toggle.5s.sh` is the

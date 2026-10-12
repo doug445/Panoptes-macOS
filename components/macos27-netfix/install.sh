@@ -7,6 +7,7 @@
 # Installs:
 #   ~/.local/bin/arp-cache-dump
 #   ~/Library/LaunchAgents/com.netwatch.arpcache.plist   (StartInterval 15)
+#   ~/.local/share/netwatch/kit/{detect,uninstall}.sh    (self-uninstall)
 #
 # Does NOT edit your scripts — it cannot know what is on a given machine.
 # It lists the ones that need patching; patch them with lib/arp_table.bash.
@@ -48,6 +49,22 @@ mkdir -p "$BIN" "$CACHE_DIR"
 cp "$HERE/lib/arp-cache-dump" "$HELPER"
 chmod 755 "$HELPER"
 echo "  installed $HELPER"
+
+# --- self-uninstall kit ---------------------------------------------------
+# The helper re-runs detect.sh after every macOS/Homebrew update and calls
+# uninstall.sh itself once the defect is confirmed gone. AUTO_UNINSTALL=0
+# leaves the kit out, which disables that.
+KIT="$CACHE_DIR/kit"
+rm -f "$CACHE_DIR/selfcheck.state"     # fresh confirmation count on (re)install
+if [ "${AUTO_UNINSTALL:-1}" = "1" ]; then
+    mkdir -p "$KIT"
+    cp "$HERE/detect.sh" "$HERE/uninstall.sh" "$KIT/"
+    chmod 755 "$KIT/detect.sh" "$KIT/uninstall.sh"
+    echo "  installed $KIT (self-uninstalls once macOS fixes the defect)"
+else
+    rm -rf "$KIT"
+    echo "  self-uninstall disabled (AUTO_UNINSTALL=0)"
+fi
 
 # --- LaunchAgent ----------------------------------------------------------
 # Paths are written from $HOME at install time, so this is not tied to one user.

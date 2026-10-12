@@ -92,7 +92,27 @@ com.netwatch.arpcache  (LaunchAgent, StartInterval 15)
 
 `arp_table()` tries the direct read first, so the scripts still work correctly
 when run by hand from zsh, and on any machine or OS where the restriction does
-not apply. Nothing needs to be undone if Apple fixes this.
+not apply.
+
+### When Apple fixes it
+
+Nothing to do. The two halves of the fix retire differently:
+
+- **The agent removes itself.** Each run, `arp-cache-dump` fingerprints the
+  macOS build, kernel, and Homebrew `bash`/`python3` versions. When that
+  changes (and once a day anyway) it re-runs `detect.sh`. After **3
+  consecutive NOT AFFECTED verdicts, 10 minutes apart**, it runs
+  `uninstall.sh` on itself, posts a "NetWatch" notification, and records why
+  in `~/.local/share/netwatch/selfcheck.log`. Any AFFECTED verdict resets the
+  count. An inconclusive one (empty ARP table) retries without counting.
+- **The `arp_table()` patches in consumer scripts stay.** They prefer the
+  direct read, so on a fixed system they are inert. Leave them, or remove them
+  by hand.
+
+Removing itself only when ARP is confirmed readable is deliberate. If the
+agent left on a false "fixed", netwatch would go blind with no warning. That
+is why `detect.sh` returns inconclusive, not NOT AFFECTED, when it cannot
+measure the ARP table.
 
 ---
 
@@ -100,13 +120,13 @@ not apply. Nothing needs to be undone if Apple fixes this.
 
 ```sh
 cd components/macos27-netfix
-./detect.sh        # read-only; exits 0 = affected, 1 = not affected
+./detect.sh        # read-only; 0 = affected, 1 = not affected, 2 = inconclusive
 ./install.sh       # idempotent; safe to re-run
 ```
 
-`install.sh` refuses to install if `detect.sh` says the machine is fine. If a
-future macOS or Homebrew build fixes this, the correct action is to run
-`./uninstall.sh`, not to keep the agent around.
+`install.sh` refuses to install if `detect.sh` says the machine is fine.
+Self-uninstall is on by default (see above). `AUTO_UNINSTALL=0 ./install.sh`
+turns it off. `./uninstall.sh` is still there for removing it early by hand.
 
 It is Intel-aware (finds the Homebrew prefix) and derives all paths from
 `$HOME`, so nothing is hardcoded to one user.
@@ -220,9 +240,9 @@ not by process state.
 | path | purpose |
 |---|---|
 | `detect.sh` | read-only; is this machine affected, and what is restricted |
-| `install.sh` | installs helper + LaunchAgent; idempotent |
-| `uninstall.sh` | removes both; use if Apple fixes the underlying issue |
+| `install.sh` | installs helper + LaunchAgent + self-uninstall kit; idempotent |
+| `uninstall.sh` | removes all of it; the agent runs it itself once fixed |
 | `verify.sh` | end-to-end health check via the tainted path |
 | `postupgrade-checks.sh` | Finder / xbar / TCC checks, read-only |
-| `lib/arp-cache-dump` | the `/bin/sh` publisher |
+| `lib/arp-cache-dump` | the `/bin/sh` publisher + self-check |
 | `lib/arp_table.bash` | snippet to paste into consumer scripts |

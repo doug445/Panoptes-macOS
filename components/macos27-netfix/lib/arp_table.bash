@@ -6,7 +6,8 @@
 # Tries the direct read FIRST, so the script keeps working when run by hand from
 # zsh (untainted) and on machines/OS versions where the restriction does not
 # apply. Falls back to the cache published by com.netwatch.arpcache only when
-# the direct read comes back empty. Nothing needs undoing if Apple fixes this.
+# the direct read comes back empty. This helper can stay if Apple fixes this
+# (the agent retires itself; the direct read then always wins).
 #
 # Requires (define near the top of the script, before first use):
 #   ARP_CACHE="${HOME}/.local/share/netwatch/arp.cache"

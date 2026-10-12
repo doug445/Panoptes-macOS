@@ -11,6 +11,8 @@ set -u
 
 LABEL="com.netwatch.arpcache"
 CACHE="$HOME/.local/share/netwatch/arp.cache"
+KIT="$HOME/.local/share/netwatch/kit"
+SELFLOG="$HOME/.local/share/netwatch/selfcheck.log"
 MAX_AGE=120
 UID_NUM=$(id -u)
 rc=0
@@ -30,8 +32,20 @@ if launchctl print "gui/$UID_NUM/$LABEL" >/dev/null 2>&1; then
         0|"(never exited)"|"") say_ok "last exit code: ${ec:-n/a}" ;;
         *) say_bad "last exit code: $ec" ;;
     esac
+elif grep -q 'self-uninstalling' "$SELFLOG" 2>/dev/null; then
+    echo "  $LABEL removed itself — defect fixed:"
+    grep 'self-uninstalling' "$SELFLOG" | tail -1 | sed 's/^/    /'
+    exit 0
 else
     say_bad "$LABEL is NOT loaded — run ./install.sh"
+fi
+
+# --- self-uninstall -------------------------------------------------------
+if [ -x "$KIT/detect.sh" ] && [ -x "$KIT/uninstall.sh" ]; then
+    say_ok "self-uninstall armed (re-checks after macOS/Homebrew updates)"
+    [ -s "$SELFLOG" ] && tail -1 "$SELFLOG" | sed 's/^/        last: /'
+else
+    echo "  --    self-uninstall disabled (no $KIT)"
 fi
 
 # --- cache ----------------------------------------------------------------

@@ -15,22 +15,88 @@
 # precise bug this exists to work around, and would do so silently.
 #
 # Written atomically so a reader never sees a half-written table.
+#
+# Also self-retiring: it re-runs detect.sh whenever macOS or Homebrew changes
+# (and once a day regardless). After CONFIRM_RUNS consecutive NOT AFFECTED
+# verdicts, spaced CONFIRM_SPACING apart, it runs uninstall.sh on itself.
 
 CACHE="${1:-$HOME/.local/share/netwatch/arp.cache}"
 DIR=$(dirname "$CACHE")
+KIT="$DIR/kit"                    # installed copies of detect.sh / uninstall.sh
+STATE="$DIR/selfcheck.state"      # fingerprint / next-due epoch / clear count
+LOG="$DIR/selfcheck.log"          # survives uninstall, so you can see why
+
+CONFIRM_RUNS=3
+CONFIRM_SPACING=600               # 10 min between confirming checks
+RECHECK=86400                     # daily re-check with nothing changed
 
 mkdir -p "$DIR" || exit 1
 
+dump_rc=1
 TMP=$(mktemp "${CACHE}.XXXXXX") || exit 1
 trap 'rm -f "$TMP"' EXIT INT TERM
 
 if /usr/sbin/arp -an > "$TMP" 2>/dev/null && [ -s "$TMP" ]; then
-    mv -f "$TMP" "$CACHE" || exit 1
-    trap - EXIT INT TERM
-    exit 0
+    mv -f "$TMP" "$CACHE" && dump_rc=0
 fi
-
 # Empty result: leave the previous cache in place rather than publishing an
 # empty table, which a consumer could misread as "no neighbours". Consumers are
 # expected to apply their own staleness limit — see arp_table.bash.
-exit 1
+rm -f "$TMP"
+trap - EXIT INT TERM
+
+# --- self-check -----------------------------------------------------------
+
+log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG"; }
+
+# A fix can only arrive with a software change, so fingerprint what could
+# carry one: the macOS build (including Rapid Security Responses), the kernel,
+# and the Homebrew interpreters (their symlinks name the Cellar version).
+fingerprint() {
+    printf '%s|%s|%s' "$(sw_vers -buildVersion 2>/dev/null)" \
+        "$(sw_vers -productVersionExtra 2>/dev/null)" "$(uname -v)"
+    for b in /opt/homebrew/bin/bash /usr/local/bin/bash \
+             /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+        [ -e "$b" ] && printf '|%s' "$(readlink "$b")"
+    done
+}
+
+save_state() {  # $1 fingerprint, $2 next-due epoch, $3 clear count
+    printf '%s\n%s\n%s\n' "$1" "$2" "$3" > "$STATE.tmp" && mv -f "$STATE.tmp" "$STATE"
+}
+
+self_check() {
+    [ -x "$KIT/detect.sh" ] && [ -x "$KIT/uninstall.sh" ] || return 0
+
+    now=$(date +%s)
+    fp=$(fingerprint)
+    last_fp="" next=0 clear=0
+    [ -r "$STATE" ] && { read -r last_fp; read -r next; read -r clear; } < "$STATE"
+    case "$next$clear" in *[!0-9]*|"") next=0 clear=0 ;; esac
+
+    if [ "$fp" != "$last_fp" ]; then
+        [ -n "$last_fp" ] && log "software changed — re-checking"
+        next=0 clear=0
+    fi
+    [ "$now" -ge "$next" ] || return 0
+
+    "$KIT/detect.sh" > /dev/null 2>&1
+    case $? in
+        0)  [ "$clear" -gt 0 ] && log "AFFECTED again — confirmation reset"
+            save_state "$fp" $((now + RECHECK)) 0 ;;
+        1)  clear=$((clear + 1))
+            log "NOT AFFECTED ($clear/$CONFIRM_RUNS)"
+            if [ "$clear" -ge "$CONFIRM_RUNS" ]; then
+                log "defect fixed on $(sw_vers -productVersion 2>/dev/null) ($(sw_vers -buildVersion 2>/dev/null)) — self-uninstalling"
+                osascript -e 'display notification "macOS no longer hides the ARP table. The com.netwatch.arpcache workaround has removed itself." with title "NetWatch"' >/dev/null 2>&1 || true
+                # exec: uninstall.sh boots this job out last, which ends us.
+                exec /bin/sh "$KIT/uninstall.sh"
+            fi
+            save_state "$fp" $((now + CONFIRM_SPACING)) "$clear" ;;
+        *)  # inconclusive (e.g. no neighbours cached): retry soon, keep count
+            save_state "$fp" $((now + CONFIRM_SPACING)) "$clear" ;;
+    esac
+}
+
+self_check
+exit "$dump_rc"

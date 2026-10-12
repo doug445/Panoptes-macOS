@@ -6,7 +6,7 @@
 # restriction? Read-only. Makes no changes.
 #
 # Exit 0 = AFFECTED (install the workaround)
-# Exit 1 = NOT AFFECTED (do not install; if the agent is present, uninstall it)
+# Exit 1 = NOT AFFECTED (do not install; an installed agent retires itself)
 # Exit 2 = could not determine
 #
 # MUST be run by an Apple-signed shell (/bin/sh). If you run this under
@@ -114,6 +114,15 @@ if [ "$AFFECTED" -eq 1 ]; then
     exit 0
 fi
 
+# The workaround exists for the ARP table, and the agent uninstalls itself on
+# this verdict — so "not affected" requires ARP to have actually been measured.
+# Readable sockets alone would not prove the ARP table is back.
+if [ "$C_ARP" -eq 0 ]; then
+    echo "$FAIL ARP not measured (clean table is empty) — inconclusive."
+    echo "       Ping the gateway and re-run."
+    exit 2
+fi
+
 echo "  VERDICT: NOT AFFECTED — do not install."
-echo "  If the workaround is already installed here, run ./uninstall.sh."
+echo "  If the workaround is installed, it removes itself after confirming this."
 exit 1
