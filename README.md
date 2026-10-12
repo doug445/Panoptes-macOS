@@ -26,7 +26,7 @@ cd macOS-SecureNetwork-Suite
 | Monitor | `netwatch` | LaunchAgent watching the Application Firewall's stealth-mode drops: port-scan alerts, gateway-identity (ARP spoofing / evil twin) detection, network-change notices. `nettop` summarises its log by source |
 | Monitor | `firewall` | Application Firewall on, stealth mode, logging (netwatch's input) |
 | Report | `netcheck` | One-shot security report: firewall, listening ports, WARP + exit check, DNS, ARP table, recent drops with vendor/rDNS, MAC randomisation, addresses |
-| Report | `checkdns` | `checkdns` One-shot network report: (mDNS, resolvers, DNSSEC, DoT, DoH, ECH, VPN + DNS-leak, smoke test) plus network aliases and functions for zsh |
+| Report | `shell`/`checkdns` | `checkdns` One-shot network report: (mDNS, resolvers, DNSSEC, DoT, DoH, ECH, VPN + DNS-leak, smoke test) plus network aliases and functions for zsh |
 | Investigate | `probesource` | TUI to investigate the source of a drop or connection with passive → aggressive tactics. [Details](components/probesource/README.md) |
 | Fix | `netfix` | macOS 27 workaround: processes forked from non-Apple binaries read an **empty ARP table**. An Apple-rooted agent publishes it to a cache the tools read. Installs only if `detect.sh` measures the defect. [Details](components/macos27-netfix/README.md) |
 
