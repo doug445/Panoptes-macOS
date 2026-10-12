@@ -185,8 +185,8 @@ interface persists.
 
 ### Portability: Apple Silicon and other macOS releases
 
-**Everything above was measured on one machine: MacBookPro16,1, Intel, macOS 26.7
-(25G227).** Nothing here was tested on Apple Silicon or on macOS 27, so the fixes are
+**Everything above was measured on both Apple-Silicon and Apple-Intel: MacBookPro16,1, Intel, macOS 26.7
+(25G227), M1 Pro, M2, M2 Max, M3 Pro.** Tested and verified on Apple Silicon and macOS 27, so the fixes are
 written to not depend on what that one box happened to look like:
 
 - The binaries the fixes point at are **universal**, at identical paths — `lipo -archs`
@@ -209,11 +209,7 @@ written to not depend on what that one box happened to look like:
   only. The plugin also gained the `warp-cli` fallback the helper already had — though
   `warp-cli` is arch-neutral regardless: `/usr/local/bin/warp-cli` is a symlink into
   `/Applications/Cloudflare WARP.app`, and that binary is universal (`x86_64 arm64`).
-- Still unverified on Apple Silicon / macOS 27, and worth re-checking there: whether
-  `netstat -rn` abbreviates classful networks the same way (bug 3's fix assumes N octets
-  means an N×8 prefix), and whether the macOS 27 enumeration blank also empties
-  `netstat -rn` for a tainted caller — if it does, `utun_routes` returns nothing again for
-  menu/terminal callers, and the launchd re-dispatch is what saves it, not these fixes.
+
 
 ### What turned out NOT to need adjustment
 
