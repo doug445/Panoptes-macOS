@@ -26,7 +26,7 @@ did not verify anything.
 | `local.warp-killswitch.watchdog` | LaunchDaemon running `warp-killswitch watchdog`: every 10 s probe raw IP (parallel pings, then TCP 443 by address, no DNS); after 3 failures with the link up, `heal`. Never acts while killed. **Measured end-to-end latency on a wedged daemon: ~137 s**, not the 45 s the interval suggests — each iteration also pays `tmo 8` against the unresponsive daemon and two `netstat` route dumps for `artifacts_desc`. |
 | wake handling | **Built into the watchdog, no dependencies:** a wall-clock jump > 120 s between iterations means the machine slept, so it reconnects and verifies. A stale tunnel after wake is the most common way the Mac tunnel dies. |
 | `local.warp-killswitch.sleepwatcher` | *Optional legacy path.* Wired up only if `sleepwatcher` already exists on the machine; it adds a clean disconnect **before** sleep. Not required and not recommended to install — nothing here needs a package manager. |
-| xbar `security-toggle.5s.sh` | existing WARP / AdGuard / ProtonVPN toggles, plus *Tear Down*, *Rebuild* (while killed), *Heal now*, *Status* (dialog), and a watchdog indicator. `warp-cli` calls are time‑bounded so a wedged daemon cannot freeze the menu. |
+| xbar `security-toggle.5s.sh` | the WARP / AdGuard / ProtonVPN toggles, plus *Tear Down*, *Rebuild* (while killed), *Heal now*, *Status* (dialog), and a watchdog indicator. `warp-cli` calls are time‑bounded so a wedged daemon cannot freeze the menu. Maintained once in `components/menubar/` and copied by this installer; ProtonVPN *Connect* parks the WARP stack (`down --keep-dns`) and *Disconnect* rebuilds it — see the suite README. |
 
 Link test uses `route get default` + `ifconfig status: active` + gateway
 **ARP** (`nc -z -G 1` to force resolution, then `arp -n`). Gateway ping is
@@ -85,8 +85,8 @@ backups). Idempotent.
 Installs: `/usr/local/bin/warp-killswitch`, `/etc/sudoers.d/warp-killswitch`,
 `/Library/LaunchDaemons/local.warp-killswitch.{watchdog,sleepwatcher}.plist`,
 the three on-demand `local.warp-killswitch.do-{down,up,heal}.plist` re-dispatch targets,
-both xbar plugin copies (originals → `~/Documents/SwiftBar/backups/`, once,
-non-executable). State in
+both xbar plugin copies, copied from `components/menubar/security-toggle.5s.sh`
+(pre-existing originals → `~/Documents/SwiftBar/backups/`, once, non-executable). State in
 `/var/db/warp-killswitch/` (`killed` marker, DNS backups, mutex). Logs in
 `/var/log/warp-killswitch.log` and `/var/log/warp-watchdog.log`.
 

@@ -1,4 +1,7 @@
 #!/bin/sh
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # uninstall.sh — remove the ARP-cache workaround.
 #
 # Use this when ./detect.sh reports NOT AFFECTED (Apple or Homebrew fixed the

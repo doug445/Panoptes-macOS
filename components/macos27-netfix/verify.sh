@@ -1,4 +1,7 @@
 #!/bin/sh
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # verify.sh — end-to-end health check of the ARP-cache workaround, exercised
 # through the tainted path that actually matters. Read-only.
 #

@@ -1,4 +1,7 @@
 #!/bin/sh
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # arp-cache-dump — publish the ARP table for consumers that cannot read it.
 #
 # On macOS 27 a process forked by a non-Apple-signed binary gets an EMPTY ARP

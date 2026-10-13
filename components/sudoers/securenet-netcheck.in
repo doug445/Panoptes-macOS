@@ -1,3 +1,6 @@
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # macOS-SecureNetwork-Suite — netcheck: read installed configuration profiles.
 # arp-scan is deliberately NOT here: it lives in a user-writable Homebrew prefix
 # and can write files (-W), so a NOPASSWD rule for it is a root escalation.

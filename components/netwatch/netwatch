@@ -1,4 +1,7 @@
 #!/opt/homebrew/bin/bash
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # netwatch (macOS) — monitor Application Firewall blocks, send native notifications
 # Relies on:
 #   - macOS Application Firewall with stealth mode + logging enabled
@@ -23,6 +26,7 @@ mkdir -p "$LOG_DIR"
 # Without this, any `set -e` death is silent and launchd just respawns us on
 # ThrottleInterval — an endless "NetWatch Active" notification loop with no
 # trace of why. Record the failing line before we go.
+# shellcheck disable=SC2154  # rc is assigned inside the single-quoted trap body
 trap 'rc=$?; printf "[%s] FATAL exit=%s at line %s: %s\n" \
     "$(date "+%Y-%m-%d %H:%M:%S")" "$rc" "$LINENO" "$BASH_COMMAND" \
     >> "${LOG_DIR}/events.log"' ERR

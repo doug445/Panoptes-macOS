@@ -1,4 +1,7 @@
 #!/opt/homebrew/bin/bash
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # netcheck (macOS) — one-shot network security status report
 set -euo pipefail
 
@@ -93,8 +96,7 @@ if command -v lsof &>/dev/null; then
     {
         lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null
         lsof -iUDP -nP 2>/dev/null | grep -vF -- "->"
-    } | awk 'NR>1 && !/^COMMAND/' | while read -r cmd pid user fd type dev sz prot addr rest; do
-        port="${addr##*:}"
+    } | awk 'NR>1 && !/^COMMAND/' | while read -r cmd _pid _user _fd _type _dev _sz _prot addr _rest; do
         host="${addr%:*}"
         if [[ "$host" == "127.0.0.1" ]] || [[ "$host" == "[::1]" ]] || [[ "$host" == "localhost" ]]; then
             echo -e "  ${GREEN}●${NC} ${addr} (localhost only) ${cmd}"

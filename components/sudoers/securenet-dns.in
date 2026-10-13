@@ -1,3 +1,6 @@
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # macOS-SecureNetwork-Suite — xbar menu: AdGuard DNS toggle and DNS-cache flush
 # without a password prompt. Apple binaries only.
 @USER@ ALL=(root) NOPASSWD: /usr/sbin/networksetup -setdnsservers *, /usr/bin/killall -HUP mDNSResponder

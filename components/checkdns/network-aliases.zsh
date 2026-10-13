@@ -1,3 +1,6 @@
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # ══ Network ═══════════════════════════════════════════════════════════════════
 # Connectivity checks, port scanning, firewall, and DNS utilities.
 # flushdns restarts mDNSResponder to clear both the DNS cache and LLMNR state.
@@ -22,7 +25,8 @@ alias scanping='nmap -sn'                                # ping sweep / host dis
 alias pingg='ping -c 5 8.8.8.8'                         # 5-packet ping to Google DNS
 alias ping1='ping -c 1'                                  # single-packet reachability check
 alias tracert='traceroute'                               # Windows-style alias for muscle memory
-alias speedtest='speedtest-cli --simple'                 # upload/download speed test
+# speedtest-go (binary: speedtest). Homebrew deprecated speedtest-cli (disabled 2027-01-18).
+alias speedtest='speedtest --unix'                       # upload/download speed test, one line per result
 
 alias arp='arp -a'                                       # display ARP cache (all local network hosts seen)
 alias route='netstat -rn'                                # routing table (numeric, no DNS lookup)

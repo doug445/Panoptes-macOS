@@ -1,4 +1,7 @@
 #!/bin/bash
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # macOS-SecureNetwork-Suite — uninstall.sh
 #
 # Removes what install.sh put in place. Run as your normal user.

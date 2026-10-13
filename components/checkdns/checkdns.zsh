@@ -1,3 +1,6 @@
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # ══ DNS / Privacy Stack ═══════════════════════════════════════════════════════
 # checkdns — comprehensive DNS and privacy stack status report.
 #
@@ -48,7 +51,7 @@ checkdns() {
     local mlocal
     mlocal="$(scutil --get LocalHostName 2>/dev/null).local"
     local mlocal_ip
-    mlocal_ip=$(timeout 2 dns-sd -Q "$mlocal" A 2>/dev/null \
+    mlocal_ip=$(_tmo 2 dns-sd -Q "$mlocal" A 2>/dev/null \
                 | awk '/Addr[[:space:]]+IN/{print $NF}' | head -1 || true)
     if [[ -n "$mlocal_ip" ]]; then
         _ok  "mDNS resolution OK  (${mlocal} → ${mlocal_ip})"
@@ -56,7 +59,7 @@ checkdns() {
         _warn "mDNS resolution inconclusive for ${mlocal}"
     fi
     local sd_count
-    sd_count=$(timeout 2 dns-sd -B _services._dns-sd._udp local. 2>/dev/null \
+    sd_count=$(_tmo 2 dns-sd -B _services._dns-sd._udp local. 2>/dev/null \
                | grep -c "Add" || true)
     (( sd_count > 0 )) \
         && _ok  "DNS-SD active (${sd_count} service types seen)" \
@@ -190,9 +193,9 @@ checkdns() {
         # flag appears in --help, which can be present even in non-ECH builds).
         local ech_probe_err
         ech_probe_err=$(curl --ech grease --max-time 1 -s -o /dev/null \
-                        https://cloudflare.com 2>&1 | grep -i "does not support" || true)
+                        https://cloudflare.com 2>&1 | grep -iE "does not support|is unknown|unknown option" || true)
         if [[ -n "$ech_probe_err" ]]; then
-            _info "Installed libcurl does not support ECH (flag present but not compiled in)"
+            _info "Installed curl cannot do ECH (no --ech, or the flag is not compiled in)"
             _info "Requires curl built against an ECH-patched OpenSSL (not yet in stock Homebrew)"
         else
             local ech_result
@@ -281,5 +284,5 @@ checkdns() {
     done
 
     printf "\n${C}──────────────────────────────────────────────────────${N}\n\n"
-    unset -f _hdr _ok _fail _warn _info _unkn
+    unset -f _hdr _ok _fail _warn _info _unkn _tmo
 }

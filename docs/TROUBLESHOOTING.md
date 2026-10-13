@@ -28,6 +28,24 @@ or **Last Resort: Tear Down** (DNS goes to DHCP so a captive portal can
 intercept; **Rebuild** restores everything). CLI: `sudo warp-killswitch status|heal|down|up`.
 Logs: `/var/log/warp-killswitch.log`, `/var/log/warp-watchdog.log`.
 
+## The ProtonVPN menu items do nothing, or bring the app to the front
+
+ProtonVPN 6.x only connects when its own app asks; `scutil --nc start` on its
+service returns 0 and changes nothing. The menu clicks the app's **Quick
+Connect** / **Disconnect** button through System Events, which needs **xbar** in
+*System Settings › Privacy & Security › Accessibility*. Without it the menu
+brings the app to the front, posts a notification saying what to click, and
+shows an orange *xbar needs Accessibility* item that opens the pane. If a
+"Successfully Connected" sheet is covering the button the plugin dismisses it
+(*Done*) first.
+
+## WARP shows ⏸️ parked but ProtonVPN is not connected
+
+The menu parked WARP for ProtonVPN and the ProtonVPN connection went away
+without a menu *Disconnect* (the app was quit, or it dropped). Nothing is
+broken: use **Rebuild WARP now** in the menu, or `sudo warp-killswitch up`.
+While parked the watchdog deliberately does nothing.
+
 ## ECH not working in a Chromium browser
 
 With a system DNS profile installed, Chromium detects "enterprise-managed DNS"

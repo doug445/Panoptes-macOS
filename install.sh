@@ -1,4 +1,7 @@
 #!/bin/bash
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # macOS-SecureNetwork-Suite — install.sh
 #
 # One installer for the whole stack: dependencies (Homebrew, Cloudflare WARP,
@@ -33,6 +36,14 @@
 set -u
 export LC_ALL=C
 
+# Run under Apple's bash whatever invoked us. `bash install.sh` resolves to Homebrew's
+# bash on most Macs, and on macOS 27 everything forked from a non-Apple binary sees an
+# empty ARP table — netfix's detect.sh would then measure a tainted baseline and the
+# killswitch self-test would be blind. Re-exec once; the guard variable stops a loop.
+if [ "${BASH:-}" != /bin/bash ] && [ -z "${SECURENET_REEXEC:-}" ] && [ -x /bin/bash ]; then
+    SECURENET_REEXEC=1 exec /bin/bash "$0" "$@"
+fi
+
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 C="$HERE/components"
 ALL="deps firewall dns sudoers warp killswitch netfix netwatch netcheck probesource shell profiles firefox"
@@ -40,7 +51,7 @@ ALL="deps firewall dns sudoers warp killswitch netfix netwatch netcheck probesou
 ADGUARD_DNS="94.140.14.140 94.140.14.141"
 FALLBACK_DNS="9.9.9.9 1.1.1.1"
 
-FORMULAE="bash nmap arp-scan watch speedtest-cli"
+FORMULAE="bash nmap arp-scan watch speedtest-go"
 # Casks are skipped when their app is already in /Applications — brew refuses
 # to adopt an app it did not install itself.
 CASKS="cloudflare-warp xbar protonvpn"
@@ -238,7 +249,9 @@ if want killswitch; then
     hdr "warp-killswitch + xbar menu"
     # The killswitch installer writes the menu plugin only where the folders exist.
     mkdir -p "$HOME/Library/Application Support/xbar/plugins" "$HOME/Documents/SwiftBar"
-    sudo bash "$C/warp-killswitch/install.sh" --user "$USER" || fail "warp-killswitch install"
+    # Apple's bash, never Homebrew's: on macOS 27 a Homebrew-rooted process reads an
+    # empty ARP table, which would blind the installer's self-test (see netfix).
+    sudo /bin/bash "$C/warp-killswitch/install.sh" --user "$USER" || fail "warp-killswitch install"
     [ -d /Applications/xbar.app ] && { pgrep -x xbar >/dev/null || open -g -a xbar; }
 fi
 
@@ -343,7 +356,7 @@ hdr "Verify"
 [ -f "$HOME/Library/LaunchAgents/com.netwatch.arpcache.plist" ] && /bin/sh "$C/macos27-netfix/verify.sh" | sed 's/^/  /'
 echo
 if [ -n "$FAILED" ]; then
-    red "Finished with problems:"; printf "$FAILED\n"; exit 1
+    red "Finished with problems:"; printf '%b\n' "$FAILED"; exit 1
 fi
 grn "macOS-SecureNetwork-Suite installed."
 echo "  Menu bar: xbar › Security Toggle     CLI: netcheck · checkdns · nettop · probesource"

@@ -1,3 +1,6 @@
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # arp_table() — paste into any bash script that reads the ARP table.
 #
 # Tries the direct read FIRST, so the script keeps working when run by hand from

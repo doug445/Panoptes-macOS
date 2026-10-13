@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 
 # --- macOS 27 ARP-table workaround ------------------------------------------
 # A process forked by a non-Apple-signed binary (Homebrew bash) gets an EMPTY
@@ -850,7 +853,7 @@ t_ike() {
 # ── added aggressive tactics ─────────────────────────────────────────────────
 t_hping_stealth() {
     # Multiple stealth scan modes against a small high-value port set.
-    local count="${2:-3}" ports="22,80,443,445,3389,8080"
+    local count="${2:-3}"
     log_section "HPING3 stealth sweep (S/F/X/N/A flags)" bash -c "
         for mode_flag in '-S SYN' '-F FIN' '-X XMAS' '-Y NULL' '-A ACK'; do
             mode=\${mode_flag#* }; flag=\${mode_flag%% *}
@@ -976,10 +979,10 @@ run_tactic() {
 
 # Filter the registry by kind characters in $1, e.g. "P" or "PA" or "PAX".
 ids_by_kind() {
-    local want="$1" t k
-    for t in "${TACTICS[@]}"; do
-        k=$(echo "$t" | awk -F'|' '{print $4}')
-        [[ "$want" == *"$k"* ]] && echo "${t%%|*}"
+    local kinds="$1" rec kind
+    for rec in "${TACTICS[@]}"; do
+        kind=$(printf '%s' "$rec" | awk -F'|' '{print $4}')
+        [[ "$kinds" == *"$kind"* ]] && echo "${rec%%|*}"
     done
 }
 
@@ -1040,8 +1043,8 @@ active_scans() {
     for f in "$STATE_DIR"/*; do
         [[ -f "$f" ]] || continue
         pid=$(basename "$f")
-        # shellcheck disable=SC1090
         ip=""; log=""; started=""; total_eta=""; planned=""
+        # shellcheck disable=SC1090  # per-scan state file written by this script
         source "$f"
         echo "$pid|$ip|$log|$started|$total_eta|$planned"
     done
@@ -1096,6 +1099,7 @@ run_relentless() {
     local r rate count flood
     for (( r=1; r<=rounds; r++ )); do
         echo "########## ROUND $r/$rounds ##########" >> "$SESSION_LOG"
+        # shellcheck disable=SC2046  # a whitespace-separated tactic-id list is the contract of run_set
         run_set "$ip" $(ids_by_kind "P")
         if (( r >= 2 )); then run_set "$ip" ping trace nq nban; fi
         if (( r >= 3 )); then run_set "$ip" smb enum snmp ike ssl nos; fi
@@ -1344,6 +1348,7 @@ summarize_ids() {
         echo "── SERVICES ──"
         show "Open TCP ports"     "$tcp"
         show "Open UDP ports"     "$udp"
+        show "HTTP"               "$http"
         show "HTTP server"        "$server"
         show "TLS subject"        "$tls"
         show "mDNS services"      "$mdns_svc"
@@ -1355,6 +1360,7 @@ summarize_ids() {
         echo
         echo "── ACTIVITY (this log) ──"
         show "Drop log lines"     "$drop_count"
+        show "netwatch hits"      "$netwatch_hits"
         show "Tactics run"        "$(grep -c '^\[BEGIN ' "$log")"
     }
 }
@@ -1574,6 +1580,7 @@ investigate() {
     # Launch the tactic batch in a background subshell. Each subshell keeps the
     # Mac awake for its own lifetime (caffeinate) and posts a desktop
     # notification when it finishes — both macOS-native, both best-effort.
+    # shellcheck disable=SC2046,SC2086  # tactic-id lists are deliberately word-split into run_set
     case "$mode" in
         S)  ( keep_awake; run_set "$ip" $tactics;          scan_epilogue "$ip" ) & ;;
         P)  ( keep_awake; run_set "$ip" $(ids_by_kind "P");   scan_epilogue "$ip" ) & ;;
@@ -1591,7 +1598,7 @@ investigate() {
 resume_scan() {
     cleanup_state
     local -a items=()
-    local entry pid ip log started total_eta planned now elapsed pct done_eta cur
+    local pid ip log started total_eta planned now elapsed pct done_eta cur
     while IFS='|' read -r pid ip log started total_eta planned; do
         [[ -z "$pid" ]] && continue
         now=$(date +%s); elapsed=$(( now - started ))
@@ -1610,8 +1617,7 @@ resume_scan() {
     # Look up the picked pid's metadata.
     local f="$STATE_DIR/$pick"
     [[ -f "$f" ]] || { info "Scan no longer running."; return 0; }
-    local ip2 log2
-    ip2=$(grep -oP '^ip=\K.*' "$f")
+    local log2
     log2=$(grep -oP '^log=\K.*' "$f")
     SESSION_LOG="$log2"
     run_scan_view "$pick" "$log2" "$f"

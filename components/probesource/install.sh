@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # install.sh (macOS) — install the probesource probe driver onto this Mac and
 # bootstrap the dependencies it needs.
 #

@@ -1,4 +1,7 @@
 #!/bin/sh
+# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
+# SPDX-License-Identifier: MIT
 # detect.sh — is this machine subject to the macOS 27 network-enumeration
 # restriction? Read-only. Makes no changes.
 #
