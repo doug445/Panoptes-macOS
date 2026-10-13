@@ -1,4 +1,3 @@
-
 # macOS-SecureNetwork-Suite — private DNS, a WARP kill-switch and network intrusion detection for macOS
 
 [![lint](https://github.com/doug445/macOS-SecureNetwork-Suite/actions/workflows/lint.yml/badge.svg)](https://github.com/doug445/macOS-SecureNetwork-Suite/actions/workflows/lint.yml)
@@ -300,6 +299,8 @@ resolver, not software. Only WARP and ProtonVPN run local daemons.
 | `~/Library/LaunchAgents/com.netwatch.plist`, `com.netwatch.arpcache.plist` | netwatch, netfix |
 | `~/.local/bin/{netwatch,nettop,netcheck,probesource,arp-cache-dump}` | netwatch, netcheck, probesource, netfix |
 | `~/.config/macos-securenetwork-suite/*.zsh` + a marked block in `~/.zshrc` | shell |
+| `~/.config/macos-securenetwork-suite/AdGuard-DoH.mobileconfig`, `chrome-doh-policy.mobileconfig` (rendered from the templates with your login name and DoH target) | profiles |
+| `~/.config/macos-securenetwork-suite/dns.conf` — optional per-machine overrides, read by the installer and the menu. `FALLBACK2=1.1.1.2` swaps the second fallback for Cloudflare's malware-blocking resolver; `DOH_URL=https://d.adguard-dns.com/dns-query/<device-id>` plus `DOH_BOOTSTRAP=94.140.14.49` point the Chromium policy and Firefox at an AdGuard DNS account resolver instead of the public one | you |
 | State / logs: `/var/db/warp-killswitch/`, `/var/log/warp-*.log`, `~/.local/share/{netwatch,probesource}/`, `~/.local/state/macos-securenetwork-suite/` | |
 
 ---
