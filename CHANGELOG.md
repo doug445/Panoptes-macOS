@@ -3,6 +3,22 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.2.1] — 2026-10-13
+
+### Fixed
+
+- **README** restored after the 2.2.0 edit garbled it, and the rendered-profile
+  and `dns.conf` rows moved into the *What gets installed where* table (they
+  had sat above the title since 2.1.0). The 2.2.0 tag still carries the
+  garbled README; use this one.
+
+### Changed
+
+- The "Registration Missing" entries in the README and troubleshooting doc
+  now say they apply only to WARP builds before the 2026.8 series. Current
+  builds keep the registration across updates and relaunch showing
+  *Connected*, so the `warp-cli` re-registration is no longer needed there.
+
 ## [2.2.0] — 2026-10-13
 
 ### Added
