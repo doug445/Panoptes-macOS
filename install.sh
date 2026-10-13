@@ -49,7 +49,12 @@ C="$HERE/components"
 ALL="deps firewall dns sudoers warp killswitch netfix netwatch netcheck probesource shell profiles firefox"
 
 ADGUARD_DNS="94.140.14.140 94.140.14.141"
-FALLBACK_DNS="9.9.9.9 1.1.1.1"
+FALLBACK1="9.9.9.9"; FALLBACK2="1.1.1.1"
+# per-machine overrides (e.g. FALLBACK2=1.1.1.2), also read by the menu-bar plugin
+DNS_CONF="$HOME/.config/macos-securenetwork-suite/dns.conf"
+# shellcheck source=/dev/null
+[ -f "$DNS_CONF" ] && . "$DNS_CONF"
+FALLBACK_DNS="$FALLBACK1 $FALLBACK2"
 
 FORMULAE="bash nmap arp-scan watch speedtest-go"
 # Casks are skipped when their app is already in /Applications — brew refuses

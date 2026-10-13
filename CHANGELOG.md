@@ -3,6 +3,15 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.1.0] — 2026-10-13
+
+### Added
+
+- **Per-machine overrides** in `~/.config/macos-securenetwork-suite/dns.conf`,
+  sourced by both the installer and the menu-bar plugin. Set
+  `FALLBACK2=1.1.1.2` there to use Cloudflare's malware-blocking resolver as
+  the second fallback; re-running the installer keeps it.
+
 ## [2.0.2] — 2026-10-13
 
 ### Changed

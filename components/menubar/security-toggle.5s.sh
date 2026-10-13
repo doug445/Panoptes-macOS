@@ -58,6 +58,10 @@ ADGUARD_PRIMARY="94.140.14.140"
 ADGUARD_SECONDARY="94.140.14.141"
 FALLBACK1="9.9.9.9"
 FALLBACK2="1.1.1.1"
+# per-machine overrides, shared with install.sh (e.g. FALLBACK2=1.1.1.2)
+DNS_CONF="$HOME/.config/macos-securenetwork-suite/dns.conf"
+# shellcheck source=/dev/null
+[ -f "$DNS_CONF" ] && . "$DNS_CONF"
 DNS_SERVICES=("Wi-Fi" "iPhone USB")                   # the services the AdGuard toggle manages
 ACCESSIBILITY_PANE="x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"
 

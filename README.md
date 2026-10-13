@@ -1,3 +1,5 @@
+| `~/.config/macos-securenetwork-suite/AdGuard-DoH.mobileconfig` (rendered from the template with your login name) | profiles |
+| `~/.config/macos-securenetwork-suite/dns.conf` — optional per-machine overrides, read by the installer and the menu: `FALLBACK2=1.1.1.2` swaps the second fallback for Cloudflare's malware-blocking resolver | you |
 # macOS-SecureNetwork-Suite — private DNS, a WARP kill-switch and network intrusion detection for macOS
 
 [![lint](https://github.com/doug445/macOS-SecureNetwork-Suite/actions/workflows/lint.yml/badge.svg)](https://github.com/doug445/macOS-SecureNetwork-Suite/actions/workflows/lint.yml)
