@@ -92,5 +92,5 @@ installing a second one disables the first (*System Settings › VPN & Filters*
 shows the toggles). To go back to the other profile, remove the suite's:
 
 ```sh
-sudo profiles remove -identifier com.will.dns.adguard-doh.profile
+sudo profiles remove -identifier "com.$USER.dns.adguard-doh.profile"
 ```

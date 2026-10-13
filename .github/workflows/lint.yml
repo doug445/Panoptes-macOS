@@ -25,7 +25,7 @@ jobs:
         id: files
         run: |
           files=""
-          for f in install.sh uninstall.sh $(find components -type f ! -name '*.md' ! -name '*.zsh' ! -name '*.in' ! -name '*.plist.in' ! -name '*.mobileconfig' ! -name '*.js' ! -name '*.bash'); do
+          for f in install.sh uninstall.sh $(find components -type f ! -name '*.md' ! -name '*.zsh' ! -name '*.in' ! -name '*.plist.in' ! -name '*.mobileconfig*' ! -name '*.js' ! -name '*.bash'); do
             [ -f "$f" ] || continue
             if head -1 "$f" | grep -qE '^#!.*\b(bash|sh)\b'; then files="$files $f"; fi
           done
@@ -77,7 +77,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils
       - name: xmllint
         run: |
-          for f in components/profiles/*.mobileconfig; do xmllint --noout "$f"; done
+          for f in components/profiles/*.mobileconfig*; do sed "s/@USER@/ci/g" "$f" | xmllint --noout -; done
           # the launchd template has @BASH@/@HOME@ placeholders; it is still XML
           xmllint --noout components/netwatch/com.netwatch.plist.in
 
@@ -89,7 +89,7 @@ jobs:
       - name: Every tool carries an SPDX MIT header
         run: |
           missing=0
-          for f in install.sh uninstall.sh $(find components -type f ! -name '*.md' ! -name '*.plist.in' ! -name '*.mobileconfig' ! -name '*.js'); do
+          for f in install.sh uninstall.sh $(find components -type f ! -name '*.md' ! -name '*.plist.in' ! -name '*.mobileconfig*' ! -name '*.js'); do
             [ -f "$f" ] || continue
             if ! grep -q 'SPDX-License-Identifier: MIT' "$f"; then
               echo "MISSING LICENSE: $f"

@@ -321,7 +321,9 @@ if want profiles; then
     # device-level ones. A DNS-settings payload is only valid at device level
     # (mdmclient: "profile must be scoped to system"), so AdGuard-DoH carries
     # PayloadScope=System and Device Management asks for an admin password.
-    prof_tmp=$(mktemp -d); usr_plist="$prof_tmp/user.plist"; sys_plist="$prof_tmp/system.plist"   # fresh paths: profiles refuses to overwrite
+    # The paths must not exist yet: `profiles show -output` silently writes
+    # nothing to a file that already exists.
+    prof_tmp=$(mktemp -d); usr_plist="$prof_tmp/user.plist"; sys_plist="$prof_tmp/system.plist"
     /usr/bin/profiles show -type configuration -output "$usr_plist" >/dev/null 2>&1 || :
     sudo /usr/bin/profiles show -type configuration -output "$sys_plist" >/dev/null 2>&1 || :
     installed_ids=$(cat "$usr_plist" "$sys_plist" 2>/dev/null | grep -A1 -F '<key>ProfileIdentifier</key>' | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p')
@@ -342,8 +344,11 @@ if want profiles; then
         done
         return 1
     }
+    # AdGuard-DoH is a template: its identifier and organization carry the login name
+    render_dir="$HOME/.config/macos-securenetwork-suite"; mkdir -p "$render_dir"
+    sed "s|@USER@|$USER|g" "$C/profiles/AdGuard-DoH.mobileconfig.in" > "$render_dir/AdGuard-DoH.mobileconfig"
     for p in AdGuard-DoH chrome-doh-policy; do
-        f="$C/profiles/$p.mobileconfig"
+        f="$C/profiles/$p.mobileconfig"; [ -f "$f" ] || f="$render_dir/$p.mobileconfig"
         id=$(/usr/libexec/PlistBuddy -c 'Print :PayloadIdentifier' "$f")
         if printf '%s\n' "$installed_ids" | grep -qxF "$id"; then
             grn "  $p installed ($id)"

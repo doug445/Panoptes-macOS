@@ -3,6 +3,16 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.0.2] — 2026-10-13
+
+### Changed
+
+- **The AdGuard DoH profile is a template.** `AdGuard-DoH.mobileconfig.in`
+  takes its profile identifier and organization from the login name at
+  install time (`com.<user>.dns.adguard-doh`), rendered to
+  `~/.config/macos-securenetwork-suite/`, instead of carrying one person's
+  name in the repository.
+
 ## [2.0.1] — 2026-10-13
 
 ### Fixed

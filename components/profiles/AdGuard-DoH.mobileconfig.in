@@ -22,7 +22,7 @@
             <key>PayloadDisplayName</key>
             <string>AdGuard DoH (ECH)</string>
             <key>PayloadIdentifier</key>
-            <string>com.will.dns.adguard-doh</string>
+            <string>com.@USER@.dns.adguard-doh</string>
             <key>PayloadType</key>
             <string>com.apple.dnsSettings.managed</string>
             <key>PayloadUUID</key>
@@ -38,9 +38,9 @@
     <key>PayloadDisplayName</key>
     <string>AdGuard DoH for ECH</string>
     <key>PayloadIdentifier</key>
-    <string>com.will.dns.adguard-doh.profile</string>
+    <string>com.@USER@.dns.adguard-doh.profile</string>
     <key>PayloadOrganization</key>
-    <string>Will</string>
+    <string>@USER@</string>
     <key>PayloadScope</key>
     <string>System</string>
     <key>PayloadRemovalDisallowed</key>
