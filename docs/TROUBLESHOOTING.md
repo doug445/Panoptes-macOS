@@ -94,3 +94,13 @@ shows the toggles). To go back to the other profile, remove the suite's:
 ```sh
 sudo profiles remove -identifier "com.$USER.dns.adguard-doh.profile"
 ```
+
+## The AdGuard DNS dashboard says this Mac is not connected
+
+The dashboard's check runs in the browser. Chromium (policy profile) and
+Firefox (`user.js`) use the suite's `DOH_URL`, which defaults to AdGuard's
+public resolver, so your device ID never appears even though the system
+resolver (the account profile) is fine. Set `DOH_URL` and `DOH_BOOTSTRAP` in
+`~/.config/macos-securenetwork-suite/dns.conf` to the account resolver, run
+`./install.sh --only profiles,firefox`, re-approve the Chromium profile and
+restart Firefox. See the FAQ in the README.

@@ -3,12 +3,12 @@ user_pref("network.dns.echconfig.enabled", true);
 user_pref("network.dns.https.enabled", true);           // fetch HTTPS DNS records (needed for ECH keys)
 user_pref("network.dns.http3_echconfig.enabled", true); // ECH over HTTP/3
 
-// ── DNS over HTTPS (DoH) → AdGuard no-log/no-ECS ────────────────────────
+// ── DNS over HTTPS (DoH) → AdGuard (DOH_URL) ────────────────────────
 user_pref("network.trr.mode", 2);                       // 2 = prefer DoH, fallback to system DNS
-user_pref("network.trr.uri", "https://94.140.14.140/dns-query"); // AdGuard privacy server
-user_pref("network.trr.bootstrapAddress", "94.140.14.140");
+user_pref("network.trr.uri", "@DOH_URL@");   // AdGuard DoH — override DOH_URL in dns.conf
+user_pref("network.trr.bootstrapAddress", "@DOH_BOOTSTRAP@");
 user_pref("doh-rollout.mode", 2);
-user_pref("doh-rollout.uri", "https://94.140.14.140/dns-query");
+user_pref("doh-rollout.uri", "@DOH_URL@");
 user_pref("doh-rollout.self-enabled", true);
 
 // ── HTTPS-Only mode ───────────────────────────────────────────────────────

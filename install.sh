@@ -50,11 +50,15 @@ ALL="deps firewall dns sudoers warp killswitch netfix netwatch netcheck probesou
 
 ADGUARD_DNS="94.140.14.140 94.140.14.141"
 FALLBACK1="9.9.9.9"; FALLBACK2="1.1.1.1"
-# per-machine overrides (e.g. FALLBACK2=1.1.1.2), also read by the menu-bar plugin
+DOH_URL="https://dns.adguard-dns.com/dns-query"   # DoH target for Chromium (policy) and Firefox (TRR)
+DOH_BOOTSTRAP="94.140.14.14"                       # its IP, for Firefox bootstrap
+# per-machine overrides, also read by the menu-bar plugin, e.g. FALLBACK2=1.1.1.2 or an
+# AdGuard DNS account resolver: DOH_URL=https://d.adguard-dns.com/dns-query/<device-id> DOH_BOOTSTRAP=94.140.14.49
 DNS_CONF="$HOME/.config/macos-securenetwork-suite/dns.conf"
 # shellcheck source=/dev/null
 [ -f "$DNS_CONF" ] && . "$DNS_CONF"
 FALLBACK_DNS="$FALLBACK1 $FALLBACK2"
+render() { sed -e "s|@USER@|$USER|g" -e "s|@DOH_URL@|$DOH_URL|g" -e "s|@DOH_BOOTSTRAP@|$DOH_BOOTSTRAP|g" "$1"; }   # fill a .in template
 
 FORMULAE="bash nmap arp-scan watch speedtest-go"
 # Casks are skipped when their app is already in /Applications — brew refuses
@@ -349,14 +353,19 @@ if want profiles; then
         done
         return 1
     }
-    # AdGuard-DoH is a template: its identifier and organization carry the login name
+    # both profiles are templates (login name, DoH target) rendered next to the shell files
     render_dir="$HOME/.config/macos-securenetwork-suite"; mkdir -p "$render_dir"
-    sed "s|@USER@|$USER|g" "$C/profiles/AdGuard-DoH.mobileconfig.in" > "$render_dir/AdGuard-DoH.mobileconfig"
     for p in AdGuard-DoH chrome-doh-policy; do
-        f="$C/profiles/$p.mobileconfig"; [ -f "$f" ] || f="$render_dir/$p.mobileconfig"
+        f="$render_dir/$p.mobileconfig"
+        render "$C/profiles/$p.mobileconfig.in" > "$f"
         id=$(/usr/libexec/PlistBuddy -c 'Print :PayloadIdentifier' "$f")
         if printf '%s\n' "$installed_ids" | grep -qxF "$id"; then
-            grn "  $p installed ($id)"
+            if [ "$p" = chrome-doh-policy ] && ! grep -qF "<string>$DOH_URL</string>" "$usr_plist"; then
+                open "$f"
+                ylw "  $p installed but its DoH target changed — re-approve it in System Settings › General › Device Management"
+            else
+                grn "  $p installed ($id)"
+            fi
         elif [ "$p" = AdGuard-DoH ] && other=$(encrypted_dns_profile); then
             grn "  $p not needed — encrypted DNS is already set by the device profile \"$other\""
             echo "    (to switch to AdGuard public DoH, remove that profile and open $f)"
@@ -376,16 +385,30 @@ if want firefox; then
     if [ ! -d "$FF" ]; then
         ylw "  no Firefox profiles — skipped"
     else
-        FMARK="// >>> macOS-SecureNetwork-Suite >>>"
+        FMARK="// >>> macOS-SecureNetwork-Suite >>>"; FEND="// <<< macOS-SecureNetwork-Suite <<<"
+        ff_tmp=$(mktemp -d); render "$C/firefox/user.js.in" > "$ff_tmp/block"
         for prof in "$FF"/*/; do
             uj="${prof}user.js"
-            if grep -qF "$FMARK" "$uj" 2>/dev/null || grep -qF 'network.trr.uri' "$uj" 2>/dev/null; then
-                grn "  $(basename "$prof"): already configured"
+            if grep -qF "$FMARK" "$uj" 2>/dev/null; then
+                awk -v s="$FMARK" -v e="$FEND" '$0==s{f=1;next} $0==e{f=0} f' "$uj" > "$ff_tmp/current"
+                if cmp -s "$ff_tmp/current" "$ff_tmp/block"; then
+                    grn "  $(basename "$prof"): already configured"
+                else
+                    # replace the marked block in place (DoH target or prefs changed)
+                    awk -v s="$FMARK" -v e="$FEND" -v blk="$ff_tmp/block" '
+                        $0==s { print; while ((getline l < blk) > 0) print l; f=1; next }
+                        $0==e { f=0 }
+                        !f' "$uj" > "$ff_tmp/new" && /bin/cp -f "$ff_tmp/new" "$uj"
+                    grn "  $(basename "$prof"): user.js block updated (restart Firefox)"
+                fi
+            elif grep -qF 'network.trr.uri' "$uj" 2>/dev/null; then
+                ylw "  $(basename "$prof"): has its own DoH settings — left alone"
             else
-                { echo "$FMARK"; cat "$C/firefox/user.js"; echo "// <<< macOS-SecureNetwork-Suite <<<"; } >> "$uj"
+                { echo "$FMARK"; cat "$ff_tmp/block"; echo "$FEND"; } >> "$uj"
                 grn "  $(basename "$prof"): user.js updated (restart Firefox)"
             fi
         done
+        rm -rf "$ff_tmp"
     fi
 fi
 

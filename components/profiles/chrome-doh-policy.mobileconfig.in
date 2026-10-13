@@ -18,7 +18,7 @@
             <key>DnsOverHttpsMode</key>
             <string>secure</string>
             <key>DnsOverHttpsTemplates</key>
-            <string>https://dns.adguard-dns.com/dns-query</string>
+            <string>@DOH_URL@</string>
         </dict>
         <dict>
             <key>PayloadType</key>
@@ -34,7 +34,7 @@
             <key>DnsOverHttpsMode</key>
             <string>secure</string>
             <key>DnsOverHttpsTemplates</key>
-            <string>https://dns.adguard-dns.com/dns-query</string>
+            <string>@DOH_URL@</string>
         </dict>
         <dict>
             <key>PayloadType</key>
@@ -50,7 +50,7 @@
             <key>DnsOverHttpsMode</key>
             <string>secure</string>
             <key>DnsOverHttpsTemplates</key>
-            <string>https://dns.adguard-dns.com/dns-query</string>
+            <string>@DOH_URL@</string>
         </dict>
         <dict>
             <key>PayloadType</key>
@@ -66,7 +66,7 @@
             <key>DnsOverHttpsMode</key>
             <string>secure</string>
             <key>DnsOverHttpsTemplates</key>
-            <string>https://dns.adguard-dns.com/dns-query</string>
+            <string>@DOH_URL@</string>
         </dict>
         <dict>
             <key>PayloadType</key>
@@ -82,7 +82,7 @@
             <key>DnsOverHttpsMode</key>
             <string>secure</string>
             <key>DnsOverHttpsTemplates</key>
-            <string>https://dns.adguard-dns.com/dns-query</string>
+            <string>@DOH_URL@</string>
         </dict>
     </array>
     <key>PayloadDescription</key>

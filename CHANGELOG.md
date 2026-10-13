@@ -3,6 +3,27 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.2.0] — 2026-10-13
+
+### Added
+
+- **`DOH_URL` / `DOH_BOOTSTRAP` overrides** in `dns.conf`. The Chromium DoH
+  policy profile and the Firefox `user.js` are now templates
+  (`chrome-doh-policy.mobileconfig.in`, `user.js.in`) rendered with the DoH
+  target, so a machine with an AdGuard DNS account can point its browsers at
+  the account resolver (`https://d.adguard-dns.com/dns-query/<device-id>`)
+  instead of the public one. Without that, the AdGuard dashboard reports the
+  Mac as "not connected" because its check runs in the browser.
+
+### Changed
+
+- The installer re-queues the Chromium policy profile when its installed DoH
+  target differs from the rendered one, and rewrites the marked block in an
+  existing Firefox `user.js` when it differs; a `user.js` that had its own
+  `network.trr.uri` before the suite is still left alone.
+- Firefox's default DoH target is now the same public resolver as Chromium's
+  (`https://dns.adguard-dns.com/dns-query`) instead of the unfiltered IP URL.
+
 ## [2.1.0] — 2026-10-13
 
 ### Added
