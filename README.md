@@ -337,8 +337,10 @@ No. WebKit has no implementation as of Safari 26, and no setting changes that.
 
 ### WARP says "Registration Missing" after an update. Now what?
 
-Cloudflare's updater reinstalls the app and recreates its database, which
-deletes the registration and resets the mode. Ignore the onboarding picker in
+Only on WARP builds before the 2026.8 series. Current builds keep the
+registration across updates and simply relaunch showing *Connected*. On an
+older build the updater reinstalled the app and recreated its database, which
+deleted the registration and reset the mode; ignore the onboarding picker in
 the GUI and run `./install.sh --only warp` — it recreates the free consumer
 registration, sets `tunnel_only` and MASQUE, and verifies `warp=on`.
 

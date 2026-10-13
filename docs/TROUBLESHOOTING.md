@@ -2,9 +2,12 @@
 
 ## WARP says "Registration Missing" after an update
 
-Cloudflare's auto-updater (`com.cloudflare.warp.updater`) reinstalls the app
-and recreates `/Library/Application Support/Cloudflare/warp.db`, which deletes
-the registration and resets the mode to `Warp`. The GUI drops into an
+**Older builds only.** Since the 2026.8 series (verified with 2026.8.2110 on
+2026-10-13) the updater keeps the registration: the app relaunches showing
+*Connected* and nothing below is needed. On earlier builds Cloudflare's
+auto-updater (`com.cloudflare.warp.updater`) reinstalled the app and recreated
+`/Library/Application Support/Cloudflare/warp.db`, which deleted the
+registration and reset the mode to `Warp`, and the GUI dropped into an
 onboarding picker — ignore it. Fix from the CLI, or just re-run
 `./install.sh --only warp`:
 
