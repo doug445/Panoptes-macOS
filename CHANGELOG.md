@@ -3,6 +3,30 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] — 2026-10-13
+
+### Fixed
+
+- **Re-running the installer queued an AdGuard DoH profile that could not be
+  approved** — Device Management failed with *"The 'VPN Service' payload could
+  not be installed. The VPN service could not be created"* (mdmclient error
+  -319). A DNS-settings payload is only valid at device level and the profile
+  did not say so, so it was installed for the user and NetworkExtension
+  refused it (*"profile must be scoped to system"*). The profile now carries
+  `PayloadScope = System`; Device Management asks for an administrator
+  password when you approve it. It also has its own UUIDs instead of sharing
+  placeholders with the Chromium policy profile.
+- **The installer never saw the Chromium DoH policy as installed** and queued
+  it on every run: it only looked at device-level profiles and that one is a
+  user profile. It now checks both lists, from a fresh temp file, because
+  `profiles show -output` silently writes nothing to a file that already
+  exists.
+- **An existing encrypted-DNS profile is respected.** macOS keeps only one
+  DNS-settings profile active, so installing the suite's profile on a Mac that
+  already had one (an AdGuard DNS account profile, for example) silently
+  disabled the other. The installer now skips its own profile when a device
+  profile already provides DoH or DoT, and names it.
+
 ## [2.0.0] — 2026-10-13
 
 A major version because the menu's behaviour changed in ways you will notice:

@@ -317,17 +317,46 @@ fi
 # ---- profiles ---------------------------------------------------------------
 if want profiles; then
     hdr "DoH configuration profiles"
-    installed=$(sudo /usr/bin/profiles show -type configuration 2>/dev/null)
+    # `profiles show` without sudo lists this user's profiles, with sudo the
+    # device-level ones. A DNS-settings payload is only valid at device level
+    # (mdmclient: "profile must be scoped to system"), so AdGuard-DoH carries
+    # PayloadScope=System and Device Management asks for an admin password.
+    prof_tmp=$(mktemp -d); usr_plist="$prof_tmp/user.plist"; sys_plist="$prof_tmp/system.plist"   # fresh paths: profiles refuses to overwrite
+    /usr/bin/profiles show -type configuration -output "$usr_plist" >/dev/null 2>&1 || :
+    sudo /usr/bin/profiles show -type configuration -output "$sys_plist" >/dev/null 2>&1 || :
+    installed_ids=$(cat "$usr_plist" "$sys_plist" 2>/dev/null | grep -A1 -F '<key>ProfileIdentifier</key>' | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p')
+    # name of an installed device profile that already sets encrypted DNS (DoH/DoT)
+    encrypted_dns_profile() {
+        i=0
+        while name=$(/usr/libexec/PlistBuddy -c "Print :_computerlevel:$i:ProfileDisplayName" "$sys_plist" 2>/dev/null); do
+            j=0
+            while ptype=$(/usr/libexec/PlistBuddy -c "Print :_computerlevel:$i:ProfileItems:$j:PayloadType" "$sys_plist" 2>/dev/null); do
+                if [ "$ptype" = com.apple.dnsSettings.managed ]; then
+                    case "$(/usr/libexec/PlistBuddy -c "Print :_computerlevel:$i:ProfileItems:$j:PayloadContent:DNSSettings:DNSProtocol" "$sys_plist" 2>/dev/null)" in
+                        HTTPS|TLS) printf '%s\n' "$name"; return 0 ;;
+                    esac
+                fi
+                j=$((j + 1))
+            done
+            i=$((i + 1))
+        done
+        return 1
+    }
     for p in AdGuard-DoH chrome-doh-policy; do
         f="$C/profiles/$p.mobileconfig"
         id=$(/usr/libexec/PlistBuddy -c 'Print :PayloadIdentifier' "$f")
-        if printf '%s' "$installed" | grep -qF "$id"; then
+        if printf '%s\n' "$installed_ids" | grep -qxF "$id"; then
             grn "  $p installed ($id)"
+        elif [ "$p" = AdGuard-DoH ] && other=$(encrypted_dns_profile); then
+            grn "  $p not needed — encrypted DNS is already set by the device profile \"$other\""
+            echo "    (to switch to AdGuard public DoH, remove that profile and open $f)"
         else
             open "$f"
             ylw "  $p queued — approve it in System Settings › General › Device Management"
+            [ "$p" = AdGuard-DoH ] && echo "    (device-level profile: Device Management asks for an administrator password)"
         fi
     done
+    rm -rf "$prof_tmp"
 fi
 
 # ---- firefox ----------------------------------------------------------------

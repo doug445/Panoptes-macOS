@@ -74,3 +74,23 @@ xbar executes every executable file in its plugin folder, so a `*.bak` left
 there loads as a second plugin wired to old code. Keep backups outside the
 folder (the installer uses `~/Documents/SwiftBar/backups/`).
 `components/macos27-netfix/postupgrade-checks.sh` finds these.
+
+## "The 'VPN Service' payload could not be installed" when approving the AdGuard DoH profile
+
+A DNS-settings payload is only valid as a **device** profile. Versions before
+2.0.1 shipped the profile without `PayloadScope = System`, so Device
+Management installed it for the user and NetworkExtension refused it
+(`log show` says *"profile must be scoped to system"*). Update the checkout,
+remove the failed copy from the *Downloaded* list in *System Settings ›
+General › Device Management*, and run `./install.sh --only profiles` again.
+Approving the fixed profile asks for an administrator password.
+
+If a device profile already provides encrypted DNS (an AdGuard DNS account
+profile, NextDNS, and so on) the installer now **skips its own** and says
+which profile it found. macOS keeps only one DNS-settings profile active:
+installing a second one disables the first (*System Settings › VPN & Filters*
+shows the toggles). To go back to the other profile, remove the suite's:
+
+```sh
+sudo profiles remove -identifier com.will.dns.adguard-doh.profile
+```

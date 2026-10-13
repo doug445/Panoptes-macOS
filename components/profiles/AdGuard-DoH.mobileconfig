@@ -26,7 +26,7 @@
             <key>PayloadType</key>
             <string>com.apple.dnsSettings.managed</string>
             <key>PayloadUUID</key>
-            <string>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</string>
+            <string>FC8182BA-2781-4336-8184-43E1AEFE6A27</string>
             <key>PayloadVersion</key>
             <integer>1</integer>
             <key>ProhibitDisablement</key>
@@ -41,12 +41,14 @@
     <string>com.will.dns.adguard-doh.profile</string>
     <key>PayloadOrganization</key>
     <string>Will</string>
+    <key>PayloadScope</key>
+    <string>System</string>
     <key>PayloadRemovalDisallowed</key>
     <false/>
     <key>PayloadType</key>
     <string>Configuration</string>
     <key>PayloadUUID</key>
-    <string>B2C3D4E5-F6A7-8901-BCDE-F12345678901</string>
+    <string>FA837017-DFCA-4507-B382-1E8F92D8AD9E</string>
     <key>PayloadVersion</key>
     <integer>1</integer>
 </dict>

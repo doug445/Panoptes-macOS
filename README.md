@@ -111,7 +111,7 @@ it is not).
 | Component | What it does |
 |---|---|
 | **`dns`** | Sets AdGuard DNS privacy servers (`94.140.14.140` / `.141` — no logging, no EDNS Client Subnet) with Quad9 and Cloudflare as DNSSEC-validating fallbacks, on Wi-Fi and iPhone USB. The menu toggles the same two services. |
-| **`profiles`** | **AdGuard DoH** system profile (DNS-over-HTTPS for every app, and the `HTTPS` records ECH needs in Safari/WebKit) and the **Chromium DoH policy** that stops Chrome, Brave, Edge, Vivaldi and Opera from turning DoH off. Approve both once in *Device Management*. |
+| **`profiles`** | **AdGuard DoH** system profile (DNS-over-HTTPS for every app, and the `HTTPS` records ECH needs in Safari/WebKit) and the **Chromium DoH policy** that stops Chrome, Brave, Edge, Vivaldi and Opera from turning DoH off. Approve both once in *Device Management* (the DoH one is device-level, so it asks for an administrator password). Skipped when a device profile already provides encrypted DNS — macOS keeps only one active. |
 | **`firefox`** | `user.js` appended to every Firefox profile: ECH, DoH to AdGuard, HTTPS-only, TLS 1.2+, OCSP required. Idempotent; marked with a block comment so it is never added twice. |
 | **`checkdns`** | One-screen DNS and privacy status for zsh: mDNSResponder health, every live resolver, DNSSEC validation (AD flag and a deliberately broken domain), DoT and DoH detection, ECH at both layers (`HTTPS` record and a real `--ech hard` handshake when curl can), active tunnels with a **DNS-leak check** on full-tunnel VPNs, and a resolution smoke test. |
 
