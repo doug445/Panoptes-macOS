@@ -54,6 +54,11 @@ exercised on Intel under macOS 26 with MacPorts. Nothing in it is tied to one
 machine: the package manager and its prefix, the Wi-Fi interface, the ProtonVPN
 service ID and the user are all read at run time.
 
+**Guides:** [WARP connected but no internet](https://doug445.github.io/macOS-SecureNetwork-Suite/cloudflare-warp-connected-no-internet-mac/) ·
+[Chrome ECH not working on macOS](https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/) ·
+[macOS 27: `arp -an` is empty](https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/) ·
+[Homebrew dropped Intel Macs: moving to MacPorts](https://doug445.github.io/macOS-SecureNetwork-Suite/homebrew-intel-mac-macports/)
+
 ---
 
 ## Why this exists
