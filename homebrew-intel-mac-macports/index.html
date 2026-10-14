@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Homebrew dropped Intel Macs: moving to MacPorts (2026)</title>
+<meta name="description" content="Homebrew moved Intel Macs to Tier 3 in September 2026: no new bottles, hours-long source builds, and an end date in 2027. How to move an Intel Mac to MacPorts safely.">
+<link rel="canonical" href="https://doug445.github.io/macOS-SecureNetwork-Suite/homebrew-intel-mac-macports/">
+<meta name="author" content="William MacKinnon">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="../style.css">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="macOS SecureNetwork Suite">
+<meta property="og:title" content="Homebrew dropped Intel Macs: moving to MacPorts (2026)">
+<meta property="og:description" content="Homebrew moved Intel Macs to Tier 3 in September 2026: no new bottles, hours-long source builds, and an end date in 2027. How to move an Intel Mac to MacPorts safely.">
+<meta property="og:url" content="https://doug445.github.io/macOS-SecureNetwork-Suite/homebrew-intel-mac-macports/">
+<meta property="og:image" content="https://doug445.github.io/macOS-SecureNetwork-Suite/card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="article:published_time" content="2026-10-14">
+<meta property="article:modified_time" content="2026-10-14">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Homebrew no longer supports Intel Macs. Here is how to move to MacPorts",
+      "description": "Homebrew moved Intel Macs to Tier 3 in September 2026: no new bottles, hours-long source builds, and an end date in 2027. How to move an Intel Mac to MacPorts safely.",
+      "datePublished": "2026-10-14",
+      "dateModified": "2026-10-14",
+      "image": "https://doug445.github.io/macOS-SecureNetwork-Suite/card.png",
+      "author": { "@type": "Person", "name": "William MacKinnon", "url": "https://github.com/doug445" },
+      "mainEntityOfPage": "https://doug445.github.io/macOS-SecureNetwork-Suite/homebrew-intel-mac-macports/",
+      "about": { "@type": "SoftwareApplication", "name": "macOS-SecureNetwork-Suite", "url": "https://doug445.github.io/macOS-SecureNetwork-Suite/", "applicationCategory": "SecurityApplication", "operatingSystem": "macOS" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "macOS SecureNetwork Suite", "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/" },
+        { "@type": "ListItem", "position": 2, "name": "Homebrew on Intel Macs", "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/homebrew-intel-mac-macports/" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Does Homebrew still work on Intel Macs?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, for now. Since September 2026 Intel macOS is Tier 3: existing bottles remain, but no new ones are built, so updated formulae may compile from source. Homebrew says it will stop running on Intel in September 2027." } },
+        { "@type": "Question", "name": "Do I have to uninstall Homebrew to use MacPorts?", "acceptedAnswer": { "@type": "Answer", "text": "No. MacPorts installs into its own root-owned prefix, /opt/local, and coexists with Homebrew in /usr/local. Put /opt/local/bin first on your PATH and move tools across at your own pace." } },
+        { "@type": "Question", "name": "Are Apple Silicon Macs affected?", "acceptedAnswer": { "@type": "Answer", "text": "No. Homebrew on Apple Silicon is unchanged and keeps building bottles. The change applies to Intel x86_64 Macs only." } },
+        { "@type": "Question", "name": "Why does brew upgrade take hours on my Intel Mac?", "acceptedAnswer": { "@type": "Answer", "text": "Because no new Intel bottles are being built, so any formula updated since the change compiles from source on your machine. Large dependencies such as LLVM can take over an hour on their own." } },
+        { "@type": "Question", "name": "Can I pin formulae to avoid the source builds?", "acceptedAnswer": { "@type": "Answer", "text": "Only briefly. brew upgrade then refuses to update anything that depends on a pinned formula, so pinning spreads until little updates at all." } }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<nav class="sitenav" aria-label="Site">
+  <div class="wrap">
+    <a class="brand" href="../">macOS SecureNetwork Suite</a>
+    <a href="../cloudflare-warp-connected-no-internet-mac/">WARP: no internet</a>
+    <a href="../chrome-ech-not-working-macos/">Chrome ECH</a>
+    <a href="../macos-27-arp-table-empty/">macOS 27 ARP</a>
+    <a href="../homebrew-intel-mac-macports/">Homebrew on Intel</a>
+    <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">GitHub</a>
+  </div>
+</nav>
+
+<main class="wrap">
+<p class="crumbs"><a href="../">macOS SecureNetwork Suite</a> › Homebrew on Intel Macs</p>
+<h1>Homebrew no longer supports Intel Macs. Here is how to move to MacPorts</h1>
+<p class="lede">
+  If <code>brew upgrade</code> on your Intel Mac has started compiling for hours, or failing, this
+  is why. Homebrew stopped building packages for Intel in September 2026, and will stop running
+  on Intel altogether in September 2027. Homebrew's own advice is to move to MacPorts. This page
+  covers what changed and how to move without breaking anything.
+</p>
+
+<h2 id="what-changed">What changed</h2>
+<ul>
+  <li><strong>November 2025</strong>:
+    <a href="https://brew.sh/2025/11/12/homebrew-5.0.0">Homebrew 5.0.0</a> announced that in
+    September 2026, macOS Intel x86_64 would move to Tier 3, "dropping CI support", and that "no
+    additional bottles (binary packages) will be built for macOS Intel".</li>
+  <li><strong>13 September 2026</strong>:
+    <a href="https://brew.sh/2026/09/13/homebrew-7.0.0/">Homebrew 7.0.0</a> made it so. Existing
+    bottles remain, but updated formulae may require source builds. Its guidance for Intel Macs on
+    macOS 11 or later is "Tier 3; no new bottles; migrate to MacPorts before Homebrew stops
+    running".</li>
+  <li><strong>September 2027</strong>: per the same notes, Homebrew "will not run … at all on
+    Intel x86_64".</li>
+</ul>
+<p>
+  Homebrew gives its reasons: Apple dropped Intel from macOS 27, and GitHub Actions is retiring its
+  Intel macOS runners. Neither is something Homebrew's volunteers can replace. Apple Silicon Macs
+  are not affected.
+</p>
+
+<h2 id="symptoms">What it looks like on your Mac</h2>
+<ul>
+  <li><strong><code>brew upgrade</code> compiles everything.</strong> Any formula updated since
+    the change has no Intel bottle, so it builds from source on your machine. On this project's
+    Intel test machine, an i9 MacBook Pro, LLVM alone took over an hour.</li>
+  <li><strong>Some formulae fail to build at all.</strong></li>
+  <li><strong>Pinning dead-ends.</strong> <code>brew pin</code> stops one rebuild, but
+    <code>brew upgrade</code> then refuses to update anything that depends on the pinned formula,
+    so the pins spread.</li>
+</ul>
+
+<h2 id="why-macports">Why MacPorts</h2>
+<ul>
+  <li><strong>It still supports Intel.</strong> Homebrew's 7.0.0 notes say MacPorts "is likely to
+    provide better results on this platform", and it keeps publishing prebuilt binary archives for
+    Intel, including macOS releases Homebrew never ran on.</li>
+  <li><strong>A root-owned prefix.</strong> Everything lives under <code>/opt/local</code>, owned
+    by root, so a user-level process can't swap a binary that root later runs. Homebrew's Intel
+    prefix, <code>/usr/local</code>, is owned by your user.</li>
+  <li><strong>It coexists with Homebrew.</strong> You can install it today and move across
+    gradually.</li>
+</ul>
+
+<h2 id="migrate">Moving an Intel Mac to MacPorts, step by step</h2>
+<ol class="steps">
+  <li>
+    <h3>Install MacPorts</h3>
+    <p>Download the signed installer for your macOS version from
+      <a href="https://www.macports.org/install.php">macports.org</a>, then update the ports
+      tree:</p>
+<div class="codeblock"><pre><code>sudo port selfupdate</code></pre></div>
+  </li>
+  <li>
+    <h3>Install the MacPorts version of each formula you use, prebuilt only</h3>
+<div class="codeblock"><pre><code>sudo port -b install &lt;name&gt;    # -b: binary archives only, fail rather than compile</code></pre></div>
+    <p>Names mostly match. The common differences:</p>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Homebrew formula</th><th>MacPorts port</th></tr></thead>
+      <tbody>
+        <tr><td><code>gnu-sed</code></td><td><code>gsed</code></td></tr>
+        <tr><td><code>wireshark</code></td><td><code>wireshark4</code></td></tr>
+        <tr><td><code>samba</code></td><td><code>samba4</code></td></tr>
+        <tr><td><code>imagemagick</code></td><td><code>ImageMagick7</code></td></tr>
+        <tr><td><code>sevenzip</code></td><td><code>7zip</code></td></tr>
+        <tr><td><code>bind</code></td><td><code>bind9</code></td></tr>
+        <tr><td><code>python@3.13</code></td><td><code>python313</code></td></tr>
+        <tr><td><code>qt</code></td><td><code>qt6</code></td></tr>
+      </tbody>
+    </table></div>
+    <p>MacPorts installs GNU tools with a <code>g</code> prefix (<code>gsed</code>,
+      <code>gtimeout</code>). The unprefixed names live in
+      <code>/opt/local/libexec/gnubin</code> if you want them on your <code>PATH</code>.</p>
+  </li>
+  <li>
+    <h3>Find what still depends on Homebrew</h3>
+    <p><code>brew uses</code> only knows about formulae. Before removing anything, look for the
+      dependencies it can't see:</p>
+    <ul>
+      <li>Programs you built that link into <code>/usr/local/opt/*</code> or
+        <code>/usr/local/Cellar/*</code>. Check them with <code>otool -L</code>.</li>
+      <li>Python virtualenvs built on Homebrew's Python. Their <code>pyvenv.cfg</code> names
+        it.</li>
+      <li>Scripts with a <code>#!/usr/local/bin/bash</code> shebang.</li>
+      <li>LaunchAgents and sudoers rules that name <code>/usr/local/bin</code> tools.</li>
+    </ul>
+  </li>
+  <li>
+    <h3>Uninstall Homebrew, dry run first</h3>
+    <p>Use Homebrew's official uninstaller from
+      <a href="https://github.com/Homebrew/install">Homebrew/install</a>. Its
+      <code>--dry-run</code> lists what it would remove:</p>
+<div class="codeblock"><pre><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)" -- --dry-run</code></pre></div>
+    <div class="note"><p><strong>Then fix the ownership Homebrew left behind.</strong> Homebrew
+      made <code>/usr/local</code> owned by your user. Return it to <code>root:wheel</code>. While
+      a user owns it, any root daemon or passwordless sudo rule that runs code from there is a
+      privilege escalation waiting to happen.</p></div>
+  </li>
+  <li>
+    <h3>Put MacPorts first on your PATH</h3>
+    <p>Put <code>/opt/local/bin</code> (and <code>/opt/local/sbin</code>) ahead of
+      <code>/usr/local/bin</code>. The MacPorts installer adds this to your shell profile. Check
+      that it is there and that it comes first.</p>
+  </li>
+</ol>
+
+<h2 id="oclp">Intel Macs on OpenCore Legacy Patcher</h2>
+<p>
+  MacPorts is the more practical choice here too. Homebrew doesn't run on older macOS releases,
+  while MacPorts still ships binaries for them. Bear in mind what OCLP itself costs: it gets a
+  newer macOS onto unsupported hardware by switching off protections Apple relies on, such as
+  SIP, the sealed system volume and AMFI code-signing enforcement. No package manager puts those
+  back.
+</p>
+
+<div class="tool"><p><strong>Automated:</strong>
+  <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">macOS-SecureNetwork-Suite</a>
+  is a network-security suite for macOS (encrypted DNS, a Cloudflare WARP kill-switch, ARP-spoofing
+  detection). From version 3.0.0 its installer uses MacPorts on Intel Macs automatically,
+  installing the signed release for your macOS if it's missing, and keeps Homebrew on Apple
+  Silicon. If an Intel Mac already has Homebrew and not MacPorts, it keeps using Homebrew.
+  <code>SECURENET_PKG=macports|homebrew</code> forces the choice. Its <code>netcheck</code>
+  report also lists an Intel or OCLP Mac's real security posture: SIP, sealed volume, AMFI,
+  Secure Boot and patch status.</p></div>
+
+<h2 id="faq">FAQ</h2>
+<details>
+  <summary>Does Homebrew still work on Intel Macs?</summary>
+  <p>Yes, for now. Since September 2026 Intel macOS is Tier 3: existing bottles remain, but no
+    new ones are built, so updated formulae may compile from source. Homebrew says it will stop
+    running on Intel in September 2027.</p>
+</details>
+<details>
+  <summary>Do I have to uninstall Homebrew to use MacPorts?</summary>
+  <p>No. MacPorts installs into its own root-owned prefix, /opt/local, and coexists with Homebrew
+    in /usr/local. Put /opt/local/bin first on your PATH and move tools across at your own
+    pace.</p>
+</details>
+<details>
+  <summary>Are Apple Silicon Macs affected?</summary>
+  <p>No. Homebrew on Apple Silicon is unchanged and keeps building bottles. The change applies to
+    Intel x86_64 Macs only.</p>
+</details>
+<details>
+  <summary>Why does brew upgrade take hours on my Intel Mac?</summary>
+  <p>Because no new Intel bottles are being built, so any formula updated since the change
+    compiles from source on your machine. Large dependencies such as LLVM can take over an hour on
+    their own.</p>
+</details>
+<details>
+  <summary>Can I pin formulae to avoid the source builds?</summary>
+  <p>Only briefly. brew upgrade then refuses to update anything that depends on a pinned formula,
+    so pinning spreads until little updates at all.</p>
+</details>
+
+<h2 id="sources">Sources</h2>
+<ul>
+  <li><a href="https://brew.sh/2025/11/12/homebrew-5.0.0">Homebrew 5.0.0 release notes</a> (12 November 2025)</li>
+  <li><a href="https://brew.sh/2026/09/13/homebrew-7.0.0/">Homebrew 7.0.0 release notes</a> (13 September 2026)</li>
+  <li><a href="https://docs.brew.sh/Support-Tiers">Homebrew support tiers</a></li>
+  <li><a href="https://www.macports.org/install.php">Installing MacPorts</a></li>
+</ul>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><strong>macOS-SecureNetwork-Suite</strong> by William MacKinnon
+      (<a href="https://github.com/doug445">doug445</a>) ·
+      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">Source on GitHub</a> ·
+      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite/issues">Issues</a></p>
+    <p>Independent project. Not affiliated with Apple, Cloudflare, Proton, AdGuard, Homebrew or MacPorts.</p>
+    <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 14 October 2026.</p>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.codeblock').forEach(function (block) {
+  var btn = document.createElement('button');
+  btn.className = 'copy'; btn.type = 'button'; btn.textContent = 'Copy';
+  btn.addEventListener('click', function () {
+    navigator.clipboard.writeText(block.querySelector('code').innerText).then(function () {
+      btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+    }).catch(function () { btn.textContent = 'Select + copy'; });
+  });
+  block.appendChild(btn);
+});
+</script>
+</body>
+</html>

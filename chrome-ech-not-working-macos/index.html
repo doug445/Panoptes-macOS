@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chrome ECH not working on Mac? Fix managed secure DNS</title>
+<meta name="description" content="Chrome, Brave and Edge on macOS turn off their own secure DNS when a DNS profile is installed, so ECH never starts. Force DoH by policy and verify it works.">
+<link rel="canonical" href="https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/">
+<meta name="author" content="William MacKinnon">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="../style.css">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="macOS SecureNetwork Suite">
+<meta property="og:title" content="Chrome ECH not working on Mac? Fix managed secure DNS">
+<meta property="og:description" content="Chrome, Brave and Edge on macOS turn off their own secure DNS when a DNS profile is installed, so ECH never starts. Force DoH by policy and verify it works.">
+<meta property="og:url" content="https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/">
+<meta property="og:image" content="https://doug445.github.io/macOS-SecureNetwork-Suite/card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="article:published_time" content="2026-10-14">
+<meta property="article:modified_time" content="2026-10-14">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "Chrome, Brave or Edge ECH not working on macOS: how to fix it",
+      "description": "Chrome, Brave and Edge on macOS turn off their own secure DNS when a DNS profile is installed, so ECH never starts. Force DoH by policy and verify it works.",
+      "datePublished": "2026-10-14",
+      "dateModified": "2026-10-14",
+      "image": "https://doug445.github.io/macOS-SecureNetwork-Suite/card.png",
+      "author": {
+        "@type": "Person",
+        "name": "William MacKinnon",
+        "url": "https://github.com/doug445"
+      },
+      "mainEntityOfPage": "https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/",
+      "about": {
+        "@type": "SoftwareApplication",
+        "name": "macOS-SecureNetwork-Suite",
+        "url": "https://doug445.github.io/macOS-SecureNetwork-Suite/",
+        "applicationCategory": "SecurityApplication",
+        "operatingSystem": "macOS"
+      }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "macOS SecureNetwork Suite",
+          "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Chrome ECH on macOS",
+          "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/"
+        }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Does Safari support ECH?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. WebKit has no implementation of Encrypted Client Hello as of Safari 26, and no setting changes that. Use Firefox or a Chromium browser for anything you want hidden from the network path."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Why doesn't Chrome use ECH even though “Use secure DNS” is on?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Because a system DNS configuration profile makes Chromium think DNS is enterprise-managed, and it silently disables its own DNS-over-HTTPS. Without it, Chrome never fetches the HTTPS record that carries the ECH key. Setting the DnsOverHttpsMode policy to secure, with a DnsOverHttpsTemplates URL, overrides that detection. Check the result at chrome://policy."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Does the same fix work for Brave, Edge, Vivaldi and Opera?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. They read the same two policy keys, DnsOverHttpsMode and DnsOverHttpsTemplates, from their own preference domains: com.brave.Browser, com.microsoft.Edge, com.vivaldi.Vivaldi and com.operasoftware.Opera. Chrome uses com.google.Chrome. One profile can carry a payload for each."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "The ECH test on defo.ie fails but tls-ech.dev passes. Which one is right?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Trust tls-ech.dev and Cloudflare's trace page (sni=encrypted) first. defo.ie is a test server whose published keys sometimes lag its server's; in October 2026 its DNS listed keys the server had retired. A failure there alone is not conclusive."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "macOS says “The ‘VPN Service’ payload could not be installed” for my DNS profile. Why?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "A DNS-settings payload is only valid in a device profile. If the profile has no PayloadScope set to System, Device Management installs it for the user and NetworkExtension refuses it; the log says the profile must be scoped to system. Add PayloadScope System, remove the failed copy from the Downloaded list in Device Management, and install it again. Approving a device profile asks for an administrator password."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "After this fix, the AdGuard DNS dashboard says my Mac is not connected. Is DNS broken?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. The dashboard runs its check inside the browser, and the browser now uses the DoH URL from the policy. If that is AdGuard's public resolver, your device ID never appears, even though every other app resolves through your account profile. Set DnsOverHttpsTemplates (and network.trr.uri in Firefox) to your account resolver, https://d.adguard-dns.com/dns-query/ followed by your device ID, then approve the updated profile and restart Firefox."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<nav class="sitenav" aria-label="Site">
+  <div class="wrap">
+    <a class="brand" href="../">macOS SecureNetwork Suite</a>
+    <a href="../cloudflare-warp-connected-no-internet-mac/">WARP: no internet</a>
+    <a href="../chrome-ech-not-working-macos/">Chrome ECH</a>
+    <a href="../macos-27-arp-table-empty/">macOS 27 ARP</a>
+    <a href="../homebrew-intel-mac-macports/">Homebrew on Intel</a>
+    <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">GitHub</a>
+  </div>
+</nav>
+
+<main class="wrap">
+<p class="crumbs"><a href="../">macOS SecureNetwork Suite</a> › Chrome ECH on macOS</p>
+<h1>Chrome, Brave or Edge ECH not working on macOS: how to fix it</h1>
+<p class="lede">You turned on “Use secure DNS” in Chrome, Brave or Edge, but <a href="https://tls-ech.dev">tls-ech.dev</a> still says you are not using Encrypted Client Hello. On a Mac with a DNS configuration profile installed, the browser has quietly switched its own DNS-over-HTTPS off, so it never receives the key ECH needs. This page shows how to switch it back on with an enterprise policy, how to set up Firefox, what Safari can and cannot do, and how to check the result.</p>
+
+<h2 id="what-ech-is">What ECH is, and why it depends on DNS</h2>
+<p>HTTPS encrypts what you send, but not which site you are talking to. The first packet of a TLS handshake, the ClientHello, carries the hostname in the clear in a field called SNI. Most network-level filtering and logging works from that one field. Encrypting your DNS does not close the gap: the name leaks again a few milliseconds later, on every connection.</p>
+<p>Encrypted Client Hello (ECH) encrypts the ClientHello to a public key that the site publishes in its DNS <code>HTTPS</code> record (type 65, also called SVCB/HTTPS). Someone watching the network then sees only the CDN in front of the site, not the hostname.</p>
+<p>So ECH needs two things:</p>
+<ul>
+  <li><strong>A browser that implements ECH.</strong> Firefox and the Chromium family (Chrome, Brave, Edge, Vivaldi, Opera) do. Safari does not.</li>
+  <li><strong>The site's <code>HTTPS</code> record, fetched over encrypted DNS.</strong> If the browser never gets that record over encrypted DNS, it has no key and sends a normal ClientHello. Nothing warns you when that happens.</li>
+</ul>
+
+<h2 id="why-chromium-turns-doh-off">Why Chrome, Brave and Edge skip ECH on macOS</h2>
+<p>Many Macs that care about DNS privacy have a system DNS configuration profile installed: AdGuard DNS, NextDNS, a company's profile, or a DNS-over-HTTPS profile you made yourself (payload type <code>com.apple.dnsSettings.managed</code>). That profile does its own job: every app on the Mac resolves through encrypted DNS.</p>
+<p>Chromium, however, takes that profile as a sign that DNS is <strong>enterprise-managed</strong>, and it silently switches off its own DNS-over-HTTPS. The “Use secure DNS” setting can still look turned on, yet the browser's internal state reports <code>secure_dns_mode: 0</code>. With its own DoH off, Chromium never fetches the <code>HTTPS</code> records that carry ECH keys, so ECH never starts. The same thing happens in every Chromium-based browser on the Mac: Chrome, Brave, Edge, Vivaldi and Opera.</p>
+<p>Google's own documentation for the <code>DnsOverHttpsMode</code> policy says as much: “If this policy is unset, for managed devices DNS-over-HTTPS queries will not be sent.” The way out is to set that policy yourself. A policy you set explicitly overrides the managed-DNS detection.</p>
+
+<h2 id="fix-chromium">Fix: force DNS-over-HTTPS in Chromium browsers by policy</h2>
+<p>You need two enterprise policies, set for each browser you use:</p>
+<div class="table-scroll"><table>
+  <thead><tr><th>Policy key</th><th>Value</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>DnsOverHttpsMode</code></td><td><code>secure</code></td><td>DNS-over-HTTPS only, with no fallback to plain DNS. Of the policy's three values (<code>off</code>, <code>automatic</code>, <code>secure</code>), this is the one used here.</td></tr>
+    <tr><td><code>DnsOverHttpsTemplates</code></td><td>your DoH URL, for example <code>https://dns.adguard-dns.com/dns-query</code></td><td>The resolver to use. When the mode is <code>secure</code>, this policy must be set and not empty.</td></tr>
+  </tbody>
+</table></div>
+<p>On macOS, browser policies are delivered as a configuration profile. Each browser reads them from its own preference domain, which becomes the <code>PayloadType</code> of a payload in the profile:</p>
+<div class="table-scroll"><table>
+  <thead><tr><th>Browser</th><th><code>PayloadType</code> (preference domain)</th></tr></thead>
+  <tbody>
+    <tr><td>Google Chrome</td><td><code>com.google.Chrome</code></td></tr>
+    <tr><td>Brave</td><td><code>com.brave.Browser</code></td></tr>
+    <tr><td>Microsoft Edge</td><td><code>com.microsoft.Edge</code></td></tr>
+    <tr><td>Vivaldi</td><td><code>com.vivaldi.Vivaldi</code></td></tr>
+    <tr><td>Opera</td><td><code>com.operasoftware.Opera</code></td></tr>
+  </tbody>
+</table></div>
+
+<h3>1. Save the profile</h3>
+<p>Save the following as <code>chrome-doh-policy.mobileconfig</code>. It has one payload per browser, and it points all five browsers at AdGuard's public DoH resolver. To use a different resolver, change each <code>DnsOverHttpsTemplates</code> string, for example to your AdGuard DNS account URL <code>https://d.adguard-dns.com/dns-query/&lt;device-id&gt;</code>.</p>
+<div class="codeblock"><pre><code>&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+    &lt;key&gt;PayloadContent&lt;/key&gt;
+    &lt;array&gt;
+        &lt;dict&gt;
+            &lt;key&gt;PayloadType&lt;/key&gt;
+            &lt;string&gt;com.google.Chrome&lt;/string&gt;
+            &lt;key&gt;PayloadVersion&lt;/key&gt;
+            &lt;integer&gt;1&lt;/integer&gt;
+            &lt;key&gt;PayloadIdentifier&lt;/key&gt;
+            &lt;string&gt;com.local.chrome.doh&lt;/string&gt;
+            &lt;key&gt;PayloadUUID&lt;/key&gt;
+            &lt;string&gt;A1B2C3D4-E5F6-7890-ABCD-EF1234567890&lt;/string&gt;
+            &lt;key&gt;PayloadEnabled&lt;/key&gt;
+            &lt;true/&gt;
+            &lt;key&gt;DnsOverHttpsMode&lt;/key&gt;
+            &lt;string&gt;secure&lt;/string&gt;
+            &lt;key&gt;DnsOverHttpsTemplates&lt;/key&gt;
+            &lt;string&gt;https://dns.adguard-dns.com/dns-query&lt;/string&gt;
+        &lt;/dict&gt;
+        &lt;dict&gt;
+            &lt;key&gt;PayloadType&lt;/key&gt;
+            &lt;string&gt;com.brave.Browser&lt;/string&gt;
+            &lt;key&gt;PayloadVersion&lt;/key&gt;
+            &lt;integer&gt;1&lt;/integer&gt;
+            &lt;key&gt;PayloadIdentifier&lt;/key&gt;
+            &lt;string&gt;com.local.brave.doh&lt;/string&gt;
+            &lt;key&gt;PayloadUUID&lt;/key&gt;
+            &lt;string&gt;A1B2C3D4-E5F6-7890-ABCD-EF1234567891&lt;/string&gt;
+            &lt;key&gt;PayloadEnabled&lt;/key&gt;
+            &lt;true/&gt;
+            &lt;key&gt;DnsOverHttpsMode&lt;/key&gt;
+            &lt;string&gt;secure&lt;/string&gt;
+            &lt;key&gt;DnsOverHttpsTemplates&lt;/key&gt;
+            &lt;string&gt;https://dns.adguard-dns.com/dns-query&lt;/string&gt;
+        &lt;/dict&gt;
+        &lt;dict&gt;
+            &lt;key&gt;PayloadType&lt;/key&gt;
+            &lt;string&gt;com.microsoft.Edge&lt;/string&gt;
+            &lt;key&gt;PayloadVersion&lt;/key&gt;
+            &lt;integer&gt;1&lt;/integer&gt;
+            &lt;key&gt;PayloadIdentifier&lt;/key&gt;
+            &lt;string&gt;com.local.edge.doh&lt;/string&gt;
+            &lt;key&gt;PayloadUUID&lt;/key&gt;
+            &lt;string&gt;A1B2C3D4-E5F6-7890-ABCD-EF1234567892&lt;/string&gt;
+            &lt;key&gt;PayloadEnabled&lt;/key&gt;
+            &lt;true/&gt;
+            &lt;key&gt;DnsOverHttpsMode&lt;/key&gt;
+            &lt;string&gt;secure&lt;/string&gt;
+            &lt;key&gt;DnsOverHttpsTemplates&lt;/key&gt;
+            &lt;string&gt;https://dns.adguard-dns.com/dns-query&lt;/string&gt;
+        &lt;/dict&gt;
+        &lt;dict&gt;
+            &lt;key&gt;PayloadType&lt;/key&gt;
+            &lt;string&gt;com.vivaldi.Vivaldi&lt;/string&gt;
+            &lt;key&gt;PayloadVersion&lt;/key&gt;
+            &lt;integer&gt;1&lt;/integer&gt;
+            &lt;key&gt;PayloadIdentifier&lt;/key&gt;
+            &lt;string&gt;com.local.vivaldi.doh&lt;/string&gt;
+            &lt;key&gt;PayloadUUID&lt;/key&gt;
+            &lt;string&gt;A1B2C3D4-E5F6-7890-ABCD-EF1234567893&lt;/string&gt;
+            &lt;key&gt;PayloadEnabled&lt;/key&gt;
+            &lt;true/&gt;
+            &lt;key&gt;DnsOverHttpsMode&lt;/key&gt;
+            &lt;string&gt;secure&lt;/string&gt;
+            &lt;key&gt;DnsOverHttpsTemplates&lt;/key&gt;
+            &lt;string&gt;https://dns.adguard-dns.com/dns-query&lt;/string&gt;
+        &lt;/dict&gt;
+        &lt;dict&gt;
+            &lt;key&gt;PayloadType&lt;/key&gt;
+            &lt;string&gt;com.operasoftware.Opera&lt;/string&gt;
+            &lt;key&gt;PayloadVersion&lt;/key&gt;
+            &lt;integer&gt;1&lt;/integer&gt;
+            &lt;key&gt;PayloadIdentifier&lt;/key&gt;
+            &lt;string&gt;com.local.opera.doh&lt;/string&gt;
+            &lt;key&gt;PayloadUUID&lt;/key&gt;
+            &lt;string&gt;A1B2C3D4-E5F6-7890-ABCD-EF1234567894&lt;/string&gt;
+            &lt;key&gt;PayloadEnabled&lt;/key&gt;
+            &lt;true/&gt;
+            &lt;key&gt;DnsOverHttpsMode&lt;/key&gt;
+            &lt;string&gt;secure&lt;/string&gt;
+            &lt;key&gt;DnsOverHttpsTemplates&lt;/key&gt;
+            &lt;string&gt;https://dns.adguard-dns.com/dns-query&lt;/string&gt;
+        &lt;/dict&gt;
+    &lt;/array&gt;
+    &lt;key&gt;PayloadDescription&lt;/key&gt;
+    &lt;string&gt;Forces DNS-over-HTTPS (secure mode) with AdGuard DNS for all Chromium browsers to enable ECH&lt;/string&gt;
+    &lt;key&gt;PayloadDisplayName&lt;/key&gt;
+    &lt;string&gt;Chromium Browser DoH Policy&lt;/string&gt;
+    &lt;key&gt;PayloadIdentifier&lt;/key&gt;
+    &lt;string&gt;com.local.chromium.doh.policy&lt;/string&gt;
+    &lt;key&gt;PayloadOrganization&lt;/key&gt;
+    &lt;string&gt;Local&lt;/string&gt;
+    &lt;key&gt;PayloadRemovalDisallowed&lt;/key&gt;
+    &lt;false/&gt;
+    &lt;key&gt;PayloadType&lt;/key&gt;
+    &lt;string&gt;Configuration&lt;/string&gt;
+    &lt;key&gt;PayloadUUID&lt;/key&gt;
+    &lt;string&gt;B2C3D4E5-F6A7-8901-BCDE-F12345678901&lt;/string&gt;
+    &lt;key&gt;PayloadVersion&lt;/key&gt;
+    &lt;integer&gt;1&lt;/integer&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;</code></pre></div>
+
+<h3>2. Install and approve it</h3>
+<p>Open the file. macOS will not install a configuration profile silently, so this only queues it:</p>
+<div class="codeblock"><pre><code>open chrome-doh-policy.mobileconfig</code></pre></div>
+<p>Then go to <em>System Settings › General › Device Management</em>, select <strong>Chromium Browser DoH Policy</strong> and approve it.</p>
+
+<h3>3. Check that the browser sees the policy</h3>
+<p>Quit and reopen the browser, then open <code>chrome://policy</code> (Edge and Brave also answer at <code>edge://policy</code> and <code>brave://policy</code>). You should see <code>DnsOverHttpsMode</code> with the value <code>secure</code> and <code>DnsOverHttpsTemplates</code> with your resolver URL. If they are missing, the profile was not approved, or the <code>PayloadType</code> does not match that browser.</p>
+<div class="note"><p><strong>Know what <code>secure</code> costs.</strong> Chrome's policy description says that <code>secure</code> mode “will only send DNS-over-HTTPS queries and will fail to resolve on error.” If the DoH server cannot be reached, these browsers stop resolving names; they do not fall back to the network's DNS. A captive portal (hotel, airport or café Wi-Fi) works by hijacking plain DNS, so it cannot redirect an encrypted query to its login page. So while the policy is in place, expect a portal's login page not to appear in these browsers.</p></div>
+
+<h2 id="firefox">Firefox: switch ECH and DoH on together</h2>
+<p>Firefox needs ECH and its own DNS-over-HTTPS (TRR) switched on together. Set these in <code>about:config</code>, or put them in a <code>user.js</code> file in your profile folder (<code>~/Library/Application Support/Firefox/Profiles/&lt;profile&gt;/</code>) and restart Firefox:</p>
+<div class="codeblock"><pre><code>// ECH
+user_pref("network.dns.echconfig.enabled", true);
+user_pref("network.dns.https.enabled", true);           // fetch HTTPS DNS records (needed for ECH keys)
+user_pref("network.dns.http3_echconfig.enabled", true); // ECH over HTTP/3
+
+// DNS over HTTPS (TRR)
+user_pref("network.trr.mode", 2);                       // 2 = prefer DoH, fall back to system DNS
+user_pref("network.trr.uri", "https://dns.adguard-dns.com/dns-query");
+user_pref("network.trr.bootstrapAddress", "94.140.14.14");</code></pre></div>
+<p><code>network.trr.bootstrapAddress</code> is the resolver's IP address, which Firefox uses to reach the DoH server itself. If you use a different resolver, change it together with <code>network.trr.uri</code>. For an AdGuard DNS account resolver that pair is <code>https://d.adguard-dns.com/dns-query/&lt;device-id&gt;</code> and <code>94.140.14.49</code>.</p>
+
+<h2 id="safari">Safari: no ECH, and no setting adds it</h2>
+<p>Safari cannot do ECH. WebKit has no implementation as of Safari 26, and nothing you configure changes that. A system DNS-over-HTTPS profile still encrypts Safari's DNS lookups and lets it fetch <code>HTTPS</code> records, but the hostname still goes out in the clear in the TLS handshake. For anything you want hidden from the network path, use Firefox or a Chromium browser with the policy above.</p>
+
+<h2 id="verify">How to check that ECH is working</h2>
+<h3>In the browser</h3>
+<ul>
+  <li><a href="https://tls-ech.dev">tls-ech.dev</a> tells you in the page whether the connection used ECH.</li>
+  <li><a href="https://crypto.cloudflare.com/cdn-cgi/trace">crypto.cloudflare.com/cdn-cgi/trace</a> prints plain-text lines about the connection. Look for <code>sni=encrypted</code>.</li>
+  <li><a href="https://defo.ie/ech-check.php">defo.ie/ech-check.php</a> is a test server too, but the keys it publishes in DNS sometimes lag behind the server's own. In October 2026 its DNS listed keys the server had already retired. A failure there on its own does not prove that your setup is broken.</li>
+</ul>
+<h3>From Terminal: does your resolver pass the ECH key?</h3>
+<p>If the browser checks fail, find out whether the <code>HTTPS</code> record reaches you at all. <code>crypto.cloudflare.com</code> publishes an ECH key; <code>cloudflare.com</code> itself does not, so it is the wrong name to test.</p>
+<div class="codeblock"><pre><code>dig +short TYPE65 crypto.cloudflare.com</code></pre></div>
+<p>Output containing <code>ech=</code> means your resolver passes the key. Use <code>TYPE65</code> rather than the name <code>HTTPS</code>: older versions of <code>dig</code> (9.10.x) do not recognise the type name and silently send an A query instead, which looks like a failure. Those older versions print the record as raw hex, which still means it arrived. Empty output means the resolver your Mac uses may be stripping <code>HTTPS</code>/SVCB records.</p>
+<p>Stock <code>curl</code> cannot test ECH: no released OpenSSL implements it. A curl built against an ECH-capable OpenSSL can, but it only gets ECH keys over DoH, because the macOS resolver does not return <code>HTTPS</code> records to it. Give it <code>--doh-url</code>, and run it with that build rather than the system <code>curl</code>:</p>
+<div class="codeblock"><pre><code>curl -v --doh-url https://dns.adguard-dns.com/dns-query --ech hard https://tls-ech.dev/</code></pre></div>
+
+<div class="tool"><p><strong>Automated:</strong> the <code>profiles</code> component of <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">macOS-SecureNetwork-Suite</a> builds the Chromium policy profile above for all five browsers, with your own DoH target, plus a system-wide AdGuard DNS-over-HTTPS profile (skipped if a device profile already provides encrypted DNS), and queues both for approval (<code>./install.sh --only profiles</code>). Its <code>firefox</code> component writes the Firefox preferences to every profile. <code>checkdns</code> then tests ECH at both layers: whether your resolver returns the <code>HTTPS</code> record for <code>crypto.cloudflare.com</code>, and, if it finds an ECH-capable curl, a real <code>--ech hard</code> handshake against tls-ech.dev with keys fetched over your DoH resolver. With only stock curl it says so rather than reporting a false failure.</p></div>
+
+<h2 id="faq">FAQ</h2>
+<details><summary>Does Safari support ECH?</summary><p>No. WebKit has no implementation of Encrypted Client Hello as of Safari 26, and no setting changes that. Use Firefox or a Chromium browser for anything you want hidden from the network path.</p></details>
+<details><summary>Why doesn't Chrome use ECH even though “Use secure DNS” is on?</summary><p>Because a system DNS configuration profile makes Chromium think DNS is enterprise-managed, and it silently disables its own DNS-over-HTTPS. Without it, Chrome never fetches the HTTPS record that carries the ECH key. Setting the DnsOverHttpsMode policy to secure, with a DnsOverHttpsTemplates URL, overrides that detection. Check the result at chrome://policy.</p></details>
+<details><summary>Does the same fix work for Brave, Edge, Vivaldi and Opera?</summary><p>Yes. They read the same two policy keys, DnsOverHttpsMode and DnsOverHttpsTemplates, from their own preference domains: com.brave.Browser, com.microsoft.Edge, com.vivaldi.Vivaldi and com.operasoftware.Opera. Chrome uses com.google.Chrome. One profile can carry a payload for each.</p></details>
+<details><summary>The ECH test on defo.ie fails but tls-ech.dev passes. Which one is right?</summary><p>Trust tls-ech.dev and Cloudflare's trace page (sni=encrypted) first. defo.ie is a test server whose published keys sometimes lag its server's; in October 2026 its DNS listed keys the server had retired. A failure there alone is not conclusive.</p></details>
+<details><summary>macOS says “The ‘VPN Service’ payload could not be installed” for my DNS profile. Why?</summary><p>A DNS-settings payload is only valid in a device profile. If the profile has no PayloadScope set to System, Device Management installs it for the user and NetworkExtension refuses it; the log says the profile must be scoped to system. Add PayloadScope System, remove the failed copy from the Downloaded list in Device Management, and install it again. Approving a device profile asks for an administrator password.</p></details>
+<details><summary>After this fix, the AdGuard DNS dashboard says my Mac is not connected. Is DNS broken?</summary><p>No. The dashboard runs its check inside the browser, and the browser now uses the DoH URL from the policy. If that is AdGuard's public resolver, your device ID never appears, even though every other app resolves through your account profile. Set DnsOverHttpsTemplates (and network.trr.uri in Firefox) to your account resolver, https://d.adguard-dns.com/dns-query/ followed by your device ID, then approve the updated profile and restart Firefox.</p></details>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><strong>macOS-SecureNetwork-Suite</strong> by William MacKinnon
+      (<a href="https://github.com/doug445">doug445</a>) ·
+      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">Source on GitHub</a> ·
+      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite/issues">Issues</a></p>
+    <p>Independent project. Not affiliated with Apple, Cloudflare, Proton, AdGuard, Homebrew or MacPorts.</p>
+    <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 14 October 2026.</p>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.codeblock').forEach(function (block) {
+  var btn = document.createElement('button');
+  btn.className = 'copy'; btn.type = 'button'; btn.textContent = 'Copy';
+  btn.addEventListener('click', function () {
+    navigator.clipboard.writeText(block.querySelector('code').innerText).then(function () {
+      btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+    }).catch(function () { btn.textContent = 'Select + copy'; });
+  });
+  block.appendChild(btn);
+});
+</script>
+</body>
+</html>

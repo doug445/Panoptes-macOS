@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>macOS 27: arp -an Empty and netstat Shows Nothing</title>
+<meta name="description" content="On macOS 27, scripts run by Homebrew bash see an empty ARP table and no sockets. How to check if you are affected, what fails, and lsof instead of netstat.">
+<link rel="canonical" href="https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/">
+<meta name="author" content="William MacKinnon">
+<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="../style.css">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="macOS SecureNetwork Suite">
+<meta property="og:title" content="macOS 27: arp -an Empty and netstat Shows Nothing">
+<meta property="og:description" content="On macOS 27, scripts run by Homebrew bash see an empty ARP table and no sockets. How to check if you are affected, what fails, and lsof instead of netstat.">
+<meta property="og:url" content="https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/">
+<meta property="og:image" content="https://doug445.github.io/macOS-SecureNetwork-Suite/card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="article:published_time" content="2026-10-14">
+<meta property="article:modified_time" content="2026-10-14">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "TechArticle",
+      "headline": "macOS 27: arp -an is empty and netstat shows nothing",
+      "description": "On macOS 27, scripts run by Homebrew bash see an empty ARP table and no sockets. How to check if you are affected, what fails, and lsof instead of netstat.",
+      "datePublished": "2026-10-14",
+      "dateModified": "2026-10-14",
+      "image": "https://doug445.github.io/macOS-SecureNetwork-Suite/card.png",
+      "author": { "@type": "Person", "name": "William MacKinnon", "url": "https://github.com/doug445" },
+      "mainEntityOfPage": "https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/",
+      "about": { "@type": "SoftwareApplication", "name": "macOS-SecureNetwork-Suite", "url": "https://doug445.github.io/macOS-SecureNetwork-Suite/", "applicationCategory": "SecurityApplication", "operatingSystem": "macOS" }
+    },
+    {
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "macOS SecureNetwork Suite", "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/" },
+        { "@type": "ListItem", "position": 2, "name": "macOS 27 ARP", "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Why is arp -an empty on macOS 27?", "acceptedAnswer": { "@type": "Answer", "text": "On macOS 27, a process forked by a binary that Apple did not sign, such as Homebrew or MacPorts bash, reads an empty ARP table, and everything that process starts inherits the restriction. Run arp -an from Apple's zsh or /bin/bash in Terminal and the table is there. The root cause is not confirmed." } },
+        { "@type": "Question", "name": "Why does netstat -an show no connections on macOS 27?", "acceptedAnswer": { "@type": "Answer", "text": "The same restriction blanks the list of Internet sockets for processes forked from non-Apple binaries. On the author's machine netstat -an showed 0 TCP and UDP rows from the restricted side and 73 from a clean shell at the same moment. Your connections are still there; the listing is what is hidden." } },
+        { "@type": "Question", "name": "What can I use instead of netstat on macOS 27?", "acceptedAnswer": { "@type": "Answer", "text": "Use lsof -nP -i. On the author's machine it returned the same 83 rows from a restricted process and from a clean one, so it is the substitute for netstat -an." } },
+        { "@type": "Question", "name": "Does reinstalling or rebuilding Homebrew bash fix the empty ARP table?", "acceptedAnswer": { "@type": "Answer", "text": "No. brew reinstall bash pours the same bottle, a build from source produces another ad hoc signed, non-platform binary with the same behaviour, and re-signing it with codesign changes nothing. Homebrew python3 is affected the same way, so this is not about bash." } },
+        { "@type": "Question", "name": "Why does bash -c 'arp -an' work but my script returns nothing?", "acceptedAnswer": { "@type": "Answer", "text": "bash runs a lone simple command in place without forking, so that one command escapes the restriction. A script file, a pipeline, command substitution and process substitution all fork, and all come back empty." } },
+        { "@type": "Question", "name": "Is my Mac's network actually broken?", "acceptedAnswer": { "@type": "Answer", "text": "No. The restriction affects listing network state, not traffic. DNS, TCP and ICMP work normally, and ifconfig, scutil, route and networksetup report the same from a restricted process as from a clean one." } }
+      ]
+    }
+  ]
+}
+</script>
+</head>
+<body>
+
+<nav class="sitenav" aria-label="Site">
+  <div class="wrap">
+    <a class="brand" href="../">macOS SecureNetwork Suite</a>
+    <a href="../cloudflare-warp-connected-no-internet-mac/">WARP: no internet</a>
+    <a href="../chrome-ech-not-working-macos/">Chrome ECH</a>
+    <a href="../macos-27-arp-table-empty/">macOS 27 ARP</a>
+    <a href="../homebrew-intel-mac-macports/">Homebrew on Intel</a>
+    <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">GitHub</a>
+  </div>
+</nav>
+
+<main class="wrap">
+<p class="crumbs"><a href="../">macOS SecureNetwork Suite</a> › macOS 27 ARP</p>
+<h1>macOS 27: arp -an is empty and netstat shows nothing</h1>
+<p class="lede">Since upgrading to macOS 27, <code>arp -an</code> prints nothing in your scripts, <code>netstat -an</code> lists no connections, and tools that worked before return empty output without an error. Your network is fine. This page explains what is being hidden and from whom, how to confirm it on your Mac, what does not fix it, and how to get the data anyway.</p>
+
+<div class="note"><p><strong>Where the numbers come from.</strong> The measurements on this page were taken by the author on one Apple silicon Mac running macOS 27.0 build 26A5388g (Golden Gate public beta 2), when the problem was found on 7 August 2026. The root cause is not confirmed, and no TCC or sandbox denial is logged when it happens. Your build may behave differently, so measure your own Mac before changing anything.</p></div>
+
+<h2 id="defect">What is happening</h2>
+<p>On macOS 27, a process forked by a binary that is not signed by Apple reads an <strong>empty ARP table</strong> and an <strong>empty list of Internet sockets</strong>.</p>
+<p>Homebrew's or MacPorts' bash is the common case, but bash is not the cause: Homebrew's <code>python3</code> is affected identically, while Apple's <code>/usr/bin/python3</code> is not. Any non-Apple binary does it. The author also lists xbar, iTerm and kitty as binaries whose children see the blank view.</p>
+<p>The restriction is inherited. Once a non-Apple binary has forked, calling <code>/bin/sh</code>, <code>/bin/zsh</code>, <code>/bin/bash</code> or <code>env</code> from inside that process is still affected. You cannot re-exec your way out.</p>
+<p>It hides network <em>state</em>, not network <em>traffic</em>. DNS lookups, TCP connections and ICMP all work normally. Nothing is broken except what your tools can see.</p>
+
+<h2 id="scope">What is blanked and what is not</h2>
+<p>Measured on the same machine at the same moment, from a restricted process and from a clean one:</p>
+<div class="table-scroll"><table>
+  <thead><tr><th>Command</th><th>Restricted</th><th>Clean</th><th>Verdict</th></tr></thead>
+  <tbody>
+    <tr><td><code>arp -an</code></td><td>0</td><td>15</td><td>fully blanked</td></tr>
+    <tr><td><code>netstat -an</code> (TCP/UDP rows)</td><td>0</td><td>73</td><td>fully blanked</td></tr>
+    <tr><td><code>netstat -rnf inet</code></td><td>211</td><td>226</td><td>link-layer rows stripped</td></tr>
+    <tr><td><code>ndp -an</code></td><td>15</td><td>19</td><td>partially stripped</td></tr>
+    <tr><td><code>lsof -nP -i</code></td><td>83</td><td>83</td><td>unaffected</td></tr>
+    <tr><td><code>ifconfig</code>, <code>scutil</code>, <code>route</code>, <code>networksetup</code></td><td>same</td><td>same</td><td>unaffected</td></tr>
+    <tr><td>DNS / TCP / ICMP traffic</td><td>works</td><td>works</td><td>unaffected</td></tr>
+  </tbody>
+</table></div>
+
+<h2 id="fork">Why a quick test says everything is fine</h2>
+<p>The precise trigger is <strong>forking</strong>. <code>bash -c 'arp -an'</code> works even under Homebrew bash, because bash runs a lone simple command in place, without forking. A script file, a pipeline, <code>$(...)</code> and process substitution all fork, and all come back empty.</p>
+<p>So typing one command at a Homebrew bash prompt, or wrapping it in <code>bash -c</code>, can make you think the problem is somewhere else. It is the forking path your scripts take that is blind.</p>
+
+<h2 id="check">Check whether your Mac is affected</h2>
+<p>Compare a clean shell with a restricted, forking one, at the same moment. For the clean side use Apple's zsh in macOS's own Terminal app, not iTerm or kitty, which are themselves non-Apple binaries.</p>
+<div class="codeblock"><pre><code>arp -an                                          # Apple zsh: should list hosts
+/opt/homebrew/bin/bash -c 'arp -an'              # one command, no fork: still works
+/opt/homebrew/bin/bash -c 'echo "$(arp -an)"'    # $(...) forks: empty if affected</code></pre></div>
+<p>Homebrew on an Intel Mac lives in <code>/usr/local/bin/bash</code>; MacPorts uses <code>/opt/local/bin/bash</code>. If the first two commands list hosts and the third prints nothing, your Mac is affected. If the clean shell's table is empty too, the test proves nothing either way: treat it as inconclusive and try again later.</p>
+<p>Then check which interpreter your scripts actually run under. <code>#!/usr/bin/env bash</code> is not clean: it resolves to Homebrew bash whenever <code>/opt/homebrew/bin</code> comes before <code>/bin</code> in your <code>PATH</code>. The same goes for <code>#!/usr/bin/env python3</code>. Check the resolved path, never the shebang text.</p>
+
+<h2 id="dead-ends">Dead ends that look like fixes</h2>
+<ul>
+  <li><strong>It is not an <code>ifscope</code> problem.</strong> Under Homebrew bash, <code>arp -n &lt;ip&gt;</code> says “no entry” while <code>arp -an</code> lists the host with an <code>ifscope</code> qualifier, which makes <code>ifscope</code> look like the culprit. It is not. Run from zsh or <code>/bin/bash</code>, <code>arp -n &lt;ip&gt;</code> works fine. Never test <code>arp</code> behaviour from Homebrew or MacPorts bash.</li>
+  <li><strong>Reinstalling bash does nothing.</strong> <code>brew reinstall bash</code> pours the same <code>arm64_tahoe</code> (macOS 26) bottle again.</li>
+  <li><strong>Building from source does nothing.</strong> <code>--build-from-source</code> produces another ad hoc signed, non-platform binary with the same behaviour.</li>
+  <li><strong>Re-signing does nothing.</strong> <code>codesign -f -s -</code> changes nothing, so this is not a stale signature.</li>
+  <li><strong>Changing the shebang to <code>#!/usr/bin/env bash</code></strong> does nothing if <code>PATH</code> still finds Homebrew's bash first.</li>
+</ul>
+
+<h2 id="lsof">Use lsof instead of netstat</h2>
+<p><code>lsof</code> is completely unaffected, and it is the substitute for <code>netstat -an</code>:</p>
+<div class="codeblock"><pre><code>lsof -nP -i</code></pre></div>
+<p>It returned the same 83 rows from both sides in the measurements above. For routing questions, <code>route</code> is also unaffected; this is how to read the default gateway safely in a script:</p>
+<div class="codeblock"><pre><code>get_gateway_ip() { route -n get default 2&gt;/dev/null | awk '/gateway:/{print $2; exit}' || true; }</code></pre></div>
+<p>If you keep a <code>netstat</code> fallback anywhere, make it report “could not look” when it gets nothing. Never let an empty result read as “nothing found”.</p>
+
+<h2 id="workaround">Reading the ARP table from an affected script</h2>
+<p>Nothing inside a restricted process can see the table, so have a clean process read it for you. launchd is Apple's, and a job it starts with an Apple binary is not restricted. The design that works:</p>
+<ol>
+  <li><strong>A LaunchAgent runs <code>/bin/sh</code></strong>, every 15 seconds (<code>StartInterval 15</code>). It must be an Apple binary: that is the whole point. The job runs <code>arp -an</code> and writes the output to a file in your home folder.</li>
+  <li><strong>Your scripts read the table directly first</strong>, and fall back to the file only when the direct read comes back empty. That way they still work when you run them by hand from zsh, and on any machine or macOS release without the restriction.</li>
+  <li><strong>Refuse a stale file.</strong> The author's limit is 120 seconds. Past that, report that the data is unavailable instead of using it. A stale cache shows the <em>pre-attack</em> gateway MAC address, which would hide exactly the ARP spoofing a network monitor exists to catch.</li>
+  <li><strong>Keep your parsing unchanged.</strong> Lines in the file look like <code>? (192.168.0.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]</code>, so in <code>awk</code> <code>$2</code> is <code>(&lt;ip&gt;)</code> and <code>$4</code> is the MAC address.</li>
+</ol>
+<p>A <code>StartInterval</code> job fires briefly and exits, so <code>launchctl print</code> shows it as <code>state = not running</code> between runs. That is correct. Judge it by how fresh the file is, not by whether the process is running.</p>
+<p>When Apple lifts the restriction, the direct read starts returning data again and the fallback is never used.</p>
+
+<h2 id="crash-loop">If a launchd script now notifies every 20–30 seconds</h2>
+<p>It is not repeating a notification. It is crash-looping and restarting. The empty ARP table is what killed it, but <code>set -euo pipefail</code> is what turned one failed lookup into a loop. A line like this:</p>
+<div class="codeblock"><pre><code>gateway_mac=$(arp -n "$ip" 2&gt;/dev/null | awk '...')</code></pre></div>
+<p>lets <code>pipefail</code> carry <code>arp</code>'s exit status 1 into the assignment, and <code>set -e</code> ends the shell, before the main loop, so the script never monitors anything. launchd restarts it under <code>KeepAlive</code> / <code>SuccessfulExit=false</code>, the startup notification fires again, and <code>ThrottleInterval 30</code> is why you see it every 20–30 seconds.</p>
+<p>Harden every helper that calls out to another command, so a passing failure degrades instead of killing the process. The <code>get_gateway_ip</code> function above, ending in <code>|| true</code>, is the pattern.</p>
+<p>Do not conclude “no error” from an empty stderr log: with <code>2&gt;/dev/null</code> on the failing command, stderr is empty in this failure mode. Ask launchd instead and look for <code>last exit code</code> and <code>runs</code>:</p>
+<div class="codeblock"><pre><code>launchctl print gui/$UID/&lt;label&gt;</code></pre></div>
+
+<h2 id="automated">A packaged version of this workaround</h2>
+<div class="tool"><p><strong>Automated:</strong> the <code>macos27-netfix</code> component of <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">macOS-SecureNetwork-Suite</a> packages the design above. Its <code>detect.sh</code> is read-only and measures whether a Homebrew- or MacPorts-rooted process sees an empty ARP table on your Mac (exit 0 affected, 1 not affected, 2 inconclusive); run <code>components/macos27-netfix/detect.sh</code> from <code>/bin/sh</code>, not from Homebrew's or MacPorts' bash. <code>install.sh</code> refuses to install unless that measurement says affected, then adds the <code>com.netwatch.arpcache</code> LaunchAgent and an <code>arp_table()</code> helper. It does not edit your scripts; it lists the ones that need patching. <code>verify.sh</code> checks that the agent is loaded, the cache is fresh and non-empty, and a restricted process can resolve the gateway MAC. The agent removes itself after three consecutive “not affected” verdicts, ten minutes apart, once a macOS or Homebrew update makes the ARP table readable again.</p></div>
+
+<h2 id="faq">FAQ</h2>
+<details><summary>Why is arp -an empty on macOS 27?</summary><p>On macOS 27, a process forked by a binary that Apple did not sign, such as Homebrew or MacPorts bash, reads an empty ARP table, and everything that process starts inherits the restriction. Run arp -an from Apple's zsh or /bin/bash in Terminal and the table is there. The root cause is not confirmed.</p></details>
+<details><summary>Why does netstat -an show no connections on macOS 27?</summary><p>The same restriction blanks the list of Internet sockets for processes forked from non-Apple binaries. On the author's machine netstat -an showed 0 TCP and UDP rows from the restricted side and 73 from a clean shell at the same moment. Your connections are still there; the listing is what is hidden.</p></details>
+<details><summary>What can I use instead of netstat on macOS 27?</summary><p>Use lsof -nP -i. On the author's machine it returned the same 83 rows from a restricted process and from a clean one, so it is the substitute for netstat -an.</p></details>
+<details><summary>Does reinstalling or rebuilding Homebrew bash fix the empty ARP table?</summary><p>No. brew reinstall bash pours the same bottle, a build from source produces another ad hoc signed, non-platform binary with the same behaviour, and re-signing it with codesign changes nothing. Homebrew python3 is affected the same way, so this is not about bash.</p></details>
+<details><summary>Why does bash -c 'arp -an' work but my script returns nothing?</summary><p>bash runs a lone simple command in place without forking, so that one command escapes the restriction. A script file, a pipeline, command substitution and process substitution all fork, and all come back empty.</p></details>
+<details><summary>Is my Mac's network actually broken?</summary><p>No. The restriction affects listing network state, not traffic. DNS, TCP and ICMP work normally, and ifconfig, scutil, route and networksetup report the same from a restricted process as from a clean one.</p></details>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p><strong>macOS-SecureNetwork-Suite</strong> by William MacKinnon
+      (<a href="https://github.com/doug445">doug445</a>) ·
+      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">Source on GitHub</a> ·
+      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite/issues">Issues</a></p>
+    <p>Independent project. Not affiliated with Apple, Cloudflare, Proton, AdGuard, Homebrew or MacPorts.</p>
+    <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 14 October 2026.</p>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.codeblock').forEach(function (block) {
+  var btn = document.createElement('button');
+  btn.className = 'copy'; btn.type = 'button'; btn.textContent = 'Copy';
+  btn.addEventListener('click', function () {
+    navigator.clipboard.writeText(block.querySelector('code').innerText).then(function () {
+      btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1500);
+    }).catch(function () { btn.textContent = 'Select + copy'; });
+  });
+  block.appendChild(btn);
+});
+</script>
+</body>
+</html>
