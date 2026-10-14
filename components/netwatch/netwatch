@@ -215,8 +215,10 @@ get_bssid() {
     local iface
     iface=$(get_wifi_iface) || true
     [[ -z "$iface" ]] && return 0
+    # macOS 14.4+/15 print "<redacted>" unless `sudo ipconfig setverbose 1` (or Location
+    # access) is granted — treat that as unknown, never as an identity.
     { ipconfig getsummary "$iface" 2>/dev/null || true; } \
-        | awk -F' : ' '/^[[:space:]]*BSSID[[:space:]]*:/ {print $2; exit}' || true
+        | awk -F' : ' '/^[[:space:]]*BSSID[[:space:]]*:/ { if ($2 != "<redacted>") print $2; exit }' || true
 }
 
 # Get current Wi-Fi SSID (macOS: networksetup -getairportnetwork en0)
@@ -234,7 +236,7 @@ get_current_ssid() {
 
     # Primary: ipconfig — unlike networksetup it is not Location-gated.
     ssid=$({ ipconfig getsummary "$iface" 2>/dev/null || true; } \
-        | awk -F' : ' '/^[[:space:]]*SSID[[:space:]]*:/ {print $2; exit}' || true)
+        | awk -F' : ' '/^[[:space:]]*SSID[[:space:]]*:/ { if ($2 != "<redacted>") print $2; exit }' || true)
 
     if [[ -z "$ssid" ]]; then
         ssid=$({ networksetup -getairportnetwork "$iface" 2>/dev/null || true; } \

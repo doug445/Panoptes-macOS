@@ -57,13 +57,19 @@ PROTON_ID="${SECURENET_PROTON_ID:-$(/usr/sbin/scutil --nc list 2>/dev/null | /us
 ADGUARD_PRIMARY="94.140.14.140"
 ADGUARD_SECONDARY="94.140.14.141"
 FALLBACK1="9.9.9.9"
-FALLBACK2="1.1.1.1"
-# per-machine overrides, shared with install.sh (e.g. FALLBACK2=1.1.1.2)
+FALLBACK2="1.1.1.2"   # Cloudflare malware-blocking; must match install.sh
+# per-machine overrides, shared with install.sh (e.g. FALLBACK2=1.1.1.1 for unfiltered)
 DNS_CONF="$HOME/.config/macos-securenetwork-suite/dns.conf"
 # shellcheck source=/dev/null
 [ -f "$DNS_CONF" ] && . "$DNS_CONF"
 DNS_SERVICES=("Wi-Fi" "iPhone USB")                   # the services the AdGuard toggle manages
 ACCESSIBILITY_PANE="x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"
+SETTINGS_NAME="System Settings"
+case "$(/usr/bin/sw_vers -productVersion)" in
+    11.*|12.*)   # System Preferences era: the Ventura pane ID does not exist there
+        ACCESSIBILITY_PANE="x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        SETTINGS_NAME="System Preferences" ;;
+esac
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 # time-bounded command (no coreutils timeout on macOS); a wedged daemon must not freeze the menu
@@ -125,7 +131,7 @@ AS
 proton_manual() {   # proton_manual RC LABEL
   /usr/bin/open -a "$PROTON_APP"
   if [ "$1" -eq 2 ]; then
-    note "ProtonVPN needs Accessibility" "System Settings › Privacy & Security › Accessibility: turn on xbar. For now, click $2 in the app."
+    note "ProtonVPN needs Accessibility" "$SETTINGS_NAME › Privacy & Security › Accessibility: turn on xbar. For now, click $2 in the app."
     /usr/bin/open -g "$ACCESSIBILITY_PANE" >/dev/null 2>&1
   else
     note "ProtonVPN" "Could not find the $2 button — click it in the app."

@@ -91,7 +91,7 @@ audit_paths() {
     # macOS layouts, so an absent one is expected, not a bug.
     for pth in $(/usr/bin/grep -v '_bin ' "$f" | /usr/bin/grep -oE '/(usr/(local/)?(s?bin)|s?bin)/[A-Za-z0-9_.-]+' | /usr/bin/sort -u); do
         case "$pth" in
-            */sleepwatcher|/usr/local/bin/warp-cli|/usr/local/bin/warp-killswitch) continue ;;  # optional / installed by us
+            */sleepwatcher|/usr/local/bin/warp-cli|/usr/local/bin/warp-killswitch|/Library/PrivilegedHelperTools/warp-killswitch) continue ;;  # optional / installed by us
         esac
         [ -x "$pth" ] || { c_red "  MISSING binary referenced by $label: $pth"; bad=$((bad + 1)); }
     done
@@ -103,7 +103,32 @@ audit_paths() {
     return 0
 }
 
-HELPER=/usr/local/bin/warp-killswitch
+# The helper runs as root (NOPASSWD sudoers rule + LaunchDaemons), so neither the file nor
+# ANY directory above it may be writable by anyone but root: a user who can write the
+# directory can replace the root-owned file and then run their own code as root.
+# /usr/local/bin is root-owned on Apple Silicon (Homebrew lives in /opt/homebrew) and on
+# Intel Macs without Homebrew, and the helper stays there. Homebrew on Intel makes
+# /usr/local/bin user-owned; then the helper goes to Apple's root-only
+# /Library/PrivilegedHelperTools and /usr/local/bin only gets a convenience link.
+HELPER_DEFAULT=/usr/local/bin/warp-killswitch
+HELPER_PRIV=/Library/PrivilegedHelperTools/warp-killswitch
+root_safe_dir() {   # 0 if DIR and every parent are root-owned and not group/world-writable
+    local d="$1" m
+    while :; do
+        [ -d "$d" ] || return 1
+        [ "$(/usr/bin/stat -f %u "$d")" = 0 ] || return 1
+        m=$(/usr/bin/stat -f %Lp "$d")
+        case "$m" in *[2367]?|*?[2367]) return 1 ;; esac
+        [ "$d" = / ] && return 0
+        d=$(/usr/bin/dirname "$d")
+    done
+}
+brew_owns_usr_local() { [ -x /usr/local/bin/brew ] || [ -d /usr/local/Homebrew ]; }
+if [ ! -d /usr/local/bin ] || root_safe_dir /usr/local/bin || ! brew_owns_usr_local; then
+    HELPER="$HELPER_DEFAULT"
+else
+    HELPER="$HELPER_PRIV"
+fi
 SUDOERS=/etc/sudoers.d/warp-killswitch
 WARP_PLIST=/Library/LaunchDaemons/com.cloudflare.1dot1dot1dot1.macos.warp.daemon.plist
 STATE_DIR=/var/db/warp-killswitch
@@ -148,7 +173,7 @@ PLUGIN_ACTIVE="$USER_HOME/Library/Application Support/xbar/plugins/security-togg
 PLUGIN_SOURCE="$USER_HOME/Documents/SwiftBar/security-toggle.5s.sh"
 
 SLEEPWATCHER=""
-for c in /opt/homebrew/sbin/sleepwatcher /usr/local/sbin/sleepwatcher /opt/homebrew/bin/sleepwatcher /usr/local/bin/sleepwatcher; do
+for c in /opt/homebrew/sbin/sleepwatcher /usr/local/sbin/sleepwatcher /opt/local/sbin/sleepwatcher /opt/homebrew/bin/sleepwatcher /usr/local/bin/sleepwatcher /opt/local/bin/sleepwatcher; do
     [ -x "$c" ] && { SLEEPWATCHER="$c"; break; }
 done
 
@@ -161,7 +186,7 @@ if [ "$UNINSTALL" -eq 1 ]; then
         /bin/launchctl bootout system "$p" >/dev/null 2>&1
         $RM -f "$p"
     done
-    $RM -f "$HELPER" "$SUDOERS"
+    $RM -f "$HELPER_DEFAULT" "$HELPER_PRIV" "$SUDOERS"
     BACKUP_DIR="$USER_HOME/Documents/SwiftBar/backups"
     for tag in active source; do
         [ "$tag" = active ] && p="$PLUGIN_ACTIVE" || p="$PLUGIN_SOURCE"
@@ -196,6 +221,15 @@ if [ "$warn" -eq 0 ]; then c_grn "  all good"; else c_ylw "  (warnings above —
 
 # ---- 1. root helper ---------------------------------------------------------
 /usr/bin/install -d -m 0755 /usr/local/bin
+if [ "$HELPER" = "$HELPER_DEFAULT" ] && ! root_safe_dir /usr/local/bin; then
+    # user-writable with no Homebrew using it (e.g. left behind by an uninstalled Homebrew)
+    "$CHOWN" root:wheel /usr/local /usr/local/bin; /bin/chmod go-w /usr/local /usr/local/bin
+    c_ylw "  /usr/local/bin was writable by a non-root user — returned to root:wheel 755"
+fi
+if [ "$HELPER" = "$HELPER_PRIV" ]; then
+    /usr/bin/install -d -m 0755 -o root -g wheel /Library/PrivilegedHelperTools
+    c_ylw "  /usr/local/bin is user-writable (Homebrew on Intel) — helper installed in $HELPER_PRIV"
+fi
 /usr/bin/install -d -m 0755 "$STATE_DIR"
 $CAT > "$HELPER" <<'HELPER_EOF'
 #!/bin/bash
@@ -837,6 +871,12 @@ HELPER_EOF
 /bin/bash -n "$HELPER" || die "helper failed syntax check."
 audit_paths "$HELPER" "warp-killswitch helper" || true
 c_grn "installed $HELPER"
+if [ "$HELPER" = "$HELPER_PRIV" ]; then
+    # CLI convenience only: sudoers and the LaunchDaemons name the real path, never this link
+    $RM -f "$HELPER_DEFAULT"; /bin/ln -s "$HELPER_PRIV" "$HELPER_DEFAULT"
+else
+    $RM -f "$HELPER_PRIV"
+fi
 
 # ---- 2. sudoers -------------------------------------------------------------
 TMP_SUDO=$(/usr/bin/mktemp)
@@ -952,7 +992,11 @@ write_plugin() {
         $CP -a "$dest" "$bak"; /bin/chmod -x "$bak"
         c_ylw "backed up $dest -> $bak"
     fi
-    $CP "$PLUGIN_SRC" "$dest"
+    if [ "$HELPER" = "$HELPER_DEFAULT" ]; then
+        $CP "$PLUGIN_SRC" "$dest"
+    else
+        /usr/bin/sed "s|^KILLSWITCH=\"$HELPER_DEFAULT\"\$|KILLSWITCH=\"$HELPER\"|" "$PLUGIN_SRC" > "$dest"
+    fi
     "$CHOWN" "$TARGET_USER" "$dest"
     /bin/chmod 0755 "$dest"
     /bin/bash -n "$dest" || die "plugin $dest failed syntax check."

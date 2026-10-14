@@ -9,8 +9,8 @@
 # ~/.local/share/probesource and never references this repo at runtime, so
 # "installing" just means dropping the one file onto your PATH. This wrapper
 # does that idempotently (locating probesource next to itself, so it works from
-# the repo or a USB copy) and can also install probesource's Homebrew-backed
-# dependencies, arch-aware for Apple Silicon and Apple T2 Intel Macs.
+# the repo or a USB copy) and can also install probesource's dependencies
+# through the suite's package layer (lib/pkg.sh).
 #
 # Usage:
 #   ./install.sh              # install to ~/.local/bin (per-user, no sudo)
@@ -20,20 +20,22 @@
 #   ./install.sh --deps-only  # install/bootstrap dependencies only (no copy)
 #   ./install.sh --no-deps    # copy the script only, skip dependency install
 #
-# Platform detection: reads `uname -m` (arm64 = Apple Silicon → Homebrew under
-# /opt/homebrew; x86_64 = Intel → /usr/local) and separately checks for the
-# Apple T2 security chip. Dependencies are installed via Homebrew as the normal
-# user — never as root. Homebrew itself can be bootstrapped if missing.
+# Package manager (lib/pkg.sh): Apple Silicon always uses Homebrew under
+# /opt/homebrew, run as the normal user — never as root. Intel and OpenCore
+# Legacy Patcher Macs use MacPorts (/opt/local, installs via sudo) when present,
+# else Homebrew under /usr/local; SECURENET_PKG=macports|homebrew forces it.
+# The chosen manager can be bootstrapped if missing.
 #
-# Dependencies installed (all via Homebrew unless noted):
-#   bash>=4, grep, gnu-sed, coreutils, gawk (GNU userland the parser needs),
-#   dialog, nmap, arp-scan, wireshark (tshark), p0f, mtr, masscan, sslscan,
-#   ike-scan, samba (smbclient), pipx, and enum4linux-ng (via pipx from git).
+# Dependencies installed (Homebrew formula / MacPorts port where different):
+#   bash>=4, grep, gnu-sed/gsed, coreutils, gawk (GNU userland the parser needs),
+#   dialog, nmap, arp-scan, wireshark/wireshark4 (tshark), p0f, mtr, masscan,
+#   sslscan, ike-scan, samba/samba4 (smbclient), pipx, and enum4linux-ng (via
+#   pipx from git). MacPorts also supplies nbtscan.
 # whois/dig/tcpdump/traceroute/curl are base-system and are not installed.
-# onesixtyone + nbtscan have no brew formula but are built from their upstream
-# GitHub repos (needs git + Xcode Command Line Tools; nbtscan also pulls
-# autoconf/automake). hping3 (unmaintained, removed from Homebrew) and
-# geoiplookup (covered by a Team Cymru DNS fallback) stay skipped by the tool.
+# onesixtyone (both managers) and nbtscan (Homebrew) have no package and are
+# built from their upstream GitHub repos (needs git + Xcode Command Line Tools;
+# nbtscan also pulls autoconf/automake). hping3 (unmaintained, removed from
+# Homebrew) and geoiplookup (covered by a Team Cymru DNS fallback) stay skipped.
 
 set -uo pipefail
 
@@ -47,7 +49,7 @@ DO_UNINSTALL=0
 DO_COPY=1        # copy the probesource script onto PATH
 DO_DEPS=auto     # auto: prompt when interactive; 1: force; 0: skip
 
-usage() { sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -67,16 +69,43 @@ done
 INTERACTIVE=0
 [[ -t 0 && -t 1 ]] && INTERACTIVE=1
 
-# ── platform / architecture detection ────────────────────────────────────────
-# arm64  → Apple Silicon, Homebrew prefix /opt/homebrew
-# x86_64 → Intel, Homebrew prefix /usr/local (T2 Macs are Intel with the Apple
-#          T2 security chip; plain pre-T2 Intel Macs use the same prefix).
+# ── platform / architecture / package manager detection ─────────────────────
+# lib/pkg.sh picks the manager: arm64 → Homebrew, prefix /opt/homebrew (always);
+# x86_64 (T2, pre-T2 and OCLP Intel Macs) → MacPorts at /opt/local if present,
+# else Homebrew at /usr/local. A copy of this directory without the suite's lib/
+# can still install the script itself; dependency install then reports why not.
 ARCH="$(uname -m)"
-case "$ARCH" in
-    arm64)  BREW_PREFIX=/opt/homebrew ;;
-    x86_64) BREW_PREFIX=/usr/local ;;
-    *)      BREW_PREFIX=/usr/local ;;   # unknown; assume Intel layout
-esac
+PKG_MGR=none
+PKG_PREFIX=/usr/local; [[ "$ARCH" == arm64 ]] && PKG_PREFIX=/opt/homebrew
+PKG_LIB="$SRC_DIR/../../lib/pkg.sh"
+if [[ -r "$PKG_LIB" ]]; then
+    PKG_LIB="$(cd "$(dirname "$PKG_LIB")" && pwd)/pkg.sh"
+    # shellcheck source=../../lib/pkg.sh
+    . "$PKG_LIB"
+    pkg_detect || exit 2
+else
+    PKG_LIB=""
+fi
+
+# Per-manager package names for the generic names used below (pkg_name hook).
+# Empty output = same name as the generic; "-" = not packaged on that manager.
+pkg_name_extra() {
+    case "$2:$1" in
+        macports:gnu-sed)   echo gsed ;;
+        macports:wireshark) echo wireshark4 ;;
+        macports:samba)     echo samba4 ;;
+        homebrew:nbtscan)   echo - ;;     # no formula — built from git instead
+        *:onesixtyone)      echo - ;;     # no formula/port — built from git
+        *:hping3|*:geoiplookup) echo - ;; # left to the tool's graceful skip
+    esac
+}
+
+# Human label for the manager, and its word for a package.
+if [[ "$PKG_MGR" == macports ]]; then
+    MGR_LABEL=MacPorts; PKG_WORD=port
+else
+    MGR_LABEL=Homebrew; PKG_WORD=formula
+fi
 
 # Detect an Apple T2 security chip (only present on 2018-2020 Intel Macs).
 has_t2() {
@@ -104,9 +133,19 @@ report_platform() {
         intel)         echo "Platform detected: Intel Mac (no Apple T2 chip)" ;;
         *)             echo "Platform detected: unknown ($ARCH)" ;;
     esac
-    echo "Homebrew prefix:   $BREW_PREFIX"
-    [[ "$PLATFORM" == intel ]] && \
-        echo "Note: pre-T2 Intel Mac — proceeding with the /usr/local Homebrew prefix."
+    if [[ "$PKG_MGR" == macports ]]; then
+        echo "MacPorts prefix:   $PKG_PREFIX"
+        [[ "$PLATFORM" == intel ]] && \
+            echo "Note: pre-T2 Intel Mac — proceeding with MacPorts at /opt/local."
+    else
+        echo "Homebrew prefix:   $PKG_PREFIX"
+        [[ "$PLATFORM" == intel ]] && \
+            echo "Note: pre-T2 Intel Mac — proceeding with the /usr/local Homebrew prefix."
+    fi
+    if [[ "$ARCH" != arm64 ]] && type is_oclp >/dev/null 2>&1 && is_oclp; then
+        echo "Note: OpenCore Legacy Patcher Mac — some probe tools may be unavailable."
+    fi
+    [[ -n "$PKG_LIB" ]] || echo "Note: lib/pkg.sh not found next to this copy — dependency install unavailable."
 }
 
 DEST="$DEST_DIR/$BIN"
@@ -122,7 +161,11 @@ if [[ "$DO_UNINSTALL" == 1 ]]; then
         echo "Nothing to remove at $DEST"
     fi
     echo "(State under ~/.local/share/probesource was left intact.)"
-    echo "(Homebrew formulae installed for probesource were left intact.)"
+    if [[ "$PKG_MGR" == macports ]]; then
+        echo "(MacPorts ports installed for probesource were left intact.)"
+    else
+        echo "(Homebrew formulae installed for probesource were left intact.)"
+    fi
     exit 0
 fi
 
@@ -158,8 +201,10 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # gnubin dir, which probesource prepends to PATH at startup. So the login shell's
 # bare `grep` may still be BSD even when the formula is installed — check the
 # gnubin symlink / `ggrep` / the bare grep, in that order. (BSD grep has no -P.)
+# MacPorts' grep port is likewise `ggrep` plus /opt/local/libexec/gnubin/grep.
 gnu_grep_ok() {
-    [[ -x "$BREW_PREFIX/opt/grep/libexec/gnubin/grep" ]] && return 0
+    [[ -x "$PKG_PREFIX/opt/grep/libexec/gnubin/grep" ]] && return 0
+    [[ "$PKG_MGR" == macports && -x "$PKG_PREFIX/libexec/gnubin/grep" ]] && return 0
     command -v ggrep >/dev/null 2>&1 && return 0
     grep --version 2>/dev/null | grep -qi 'gnu grep'
 }
@@ -167,9 +212,9 @@ gnu_grep_ok() {
 # Ensure Homebrew's bin dir is on PATH for the rest of this script, using the
 # arch-correct prefix. brew is never invoked under sudo.
 ensure_brew_on_path() {
-    if [[ -x "$BREW_PREFIX/bin/brew" ]]; then
-        eval "$("$BREW_PREFIX/bin/brew" shellenv)" 2>/dev/null || \
-            export PATH="$BREW_PREFIX/bin:$PATH"
+    if [[ -x "$PKG_PREFIX/bin/brew" ]]; then
+        eval "$("$PKG_PREFIX/bin/brew" shellenv)" 2>/dev/null || \
+            export PATH="$PKG_PREFIX/bin:$PATH"
         return 0
     fi
     have brew && return 0
@@ -181,7 +226,7 @@ ensure_brew_on_path() {
 bootstrap_homebrew() {
     if ensure_brew_on_path; then return 0; fi
     echo
-    echo "Homebrew was not found at $BREW_PREFIX (needed to install probe tools)."
+    echo "Homebrew was not found at $PKG_PREFIX (needed to install probe tools)."
     if [[ "$INTERACTIVE" != 1 ]]; then
         echo "Non-interactive: skipping Homebrew install. Install it from https://brew.sh,"
         echo "then re-run: $0 --deps-only"
@@ -202,20 +247,53 @@ bootstrap_homebrew() {
     ensure_brew_on_path
 }
 
-# brew wrapper — never run as root. If we happen to be root (e.g. --system via
-# sudo), we cannot safely invoke brew, so callers must gate on this.
-brewsafe() {
-    if [[ "$(id -u)" == 0 ]]; then
-        echo "Refusing to run 'brew $*' as root — skipping." >&2
+# Offer to bootstrap MacPorts (signature-verified installer from lib/pkg.sh).
+# Returns 0 if /opt/local/bin/port is available afterward.
+bootstrap_macports() {
+    [[ -x /opt/local/bin/port ]] && return 0
+    echo
+    echo "MacPorts was not found at /opt/local (needed to install probe tools)."
+    if [[ "$INTERACTIVE" != 1 ]]; then
+        echo "Non-interactive: skipping MacPorts install. Install it from"
+        echo "https://www.macports.org/install.php, then re-run: $0 --deps-only"
         return 1
     fi
-    brew "$@"
+    local ans
+    read -r -p "Install MacPorts now (signed installer, uses sudo)? [Y/n] " ans
+    case "$ans" in
+        [Nn]*) echo "Skipping MacPorts install."; return 1 ;;
+    esac
+    pkg_bootstrap || { echo "MacPorts install failed." >&2; return 1; }
+    [[ -x /opt/local/bin/port ]]
 }
 
-# Homebrew formulae backing each probe command probesource may use. A command
-# with an empty value is base-system or has no formula and is skipped.
+# Make the selected package manager usable (bootstrapping it if missing).
+ensure_pkg_mgr() {
+    case "$PKG_MGR" in
+        homebrew) ensure_brew_on_path || bootstrap_homebrew ;;
+        macports) bootstrap_macports ;;
+        *)        return 1 ;;
+    esac
+}
+
+# Install generic package names through lib/pkg.sh. Homebrew is never run as
+# root (if we happen to be root, e.g. --system via sudo, we refuse and skip);
+# MacPorts installs go through sudo inside pkg_install.
+pm_install() {
+    if [[ "$PKG_MGR" == homebrew && "$(id -u)" == 0 ]]; then
+        local g names=()
+        for g in "$@"; do names+=("$(pkg_name "$g")"); done
+        echo "Refusing to run 'brew install ${names[*]}' as root — skipping." >&2
+        return 1
+    fi
+    pkg_install "$@"
+}
+
+# Generic package backing each probe command probesource may use (generic =
+# Homebrew formula name; pkg_name maps it per manager). A command whose package
+# is "not available" is skipped.
 #   base system (do NOT install): whois dig tcpdump traceroute curl
-#   no brew formula (skipped by the tool): nbtscan onesixtyone hping3 geoiplookup
+#   no package (skipped by the tool): hping3 geoiplookup
 declare -A DEP_PKG=(
     [bash]="bash"
     [grep]="grep"
@@ -235,26 +313,33 @@ declare -A DEP_PKG=(
     [pipx]="pipx"
 )
 
-# Ordered list of (command -> formula) we try to satisfy. enum4linux-ng is
-# handled separately via pipx (no brew formula / not on PyPI as a stable name).
+# Ordered list of (command -> package) we try to satisfy. enum4linux-ng is
+# handled separately via pipx (no formula/port / not on PyPI as a stable name).
 DEP_CMDS=(bash grep gsed gstat gawk dialog nmap arp-scan tshark p0f mtr \
           masscan sslscan ike-scan smbclient pipx)
 
-# No Homebrew formula. onesixtyone + nbtscan we build from their upstream GitHub
-# repos (both validated building on Apple Silicon); hping3 is unmaintained and
-# was removed from Homebrew, and geoiplookup is covered by the tool's Team Cymru
-# DNS fallback — those two stay skipped.
+# No package. onesixtyone (and nbtscan on Homebrew) we build from their upstream
+# GitHub repos (both validated building on Apple Silicon); MacPorts packages
+# nbtscan, so there it is an ordinary dependency. hping3 is unmaintained and was
+# removed from Homebrew, and geoiplookup is covered by the tool's Team Cymru DNS
+# fallback — those two stay skipped.
 SRC_BUILD=(onesixtyone nbtscan)
 NO_BUILD=(hping3 geoiplookup)
+if [[ "$PKG_MGR" == macports ]]; then
+    DEP_PKG[nbtscan]="nbtscan"
+    DEP_CMDS+=(nbtscan)
+    SRC_BUILD=(onesixtyone)
+fi
 
 # Where built-from-source binaries land: prefer the Homebrew bin (alongside the
-# other probe tools, always on probesource's PATH) when writable, else ~/.local/bin.
+# other probe tools, always on probesource's PATH) when writable, else
+# ~/.local/bin. Never the root-owned MacPorts prefix.
 build_dest() {
-    if [[ -w "$BREW_PREFIX/bin" ]]; then printf '%s' "$BREW_PREFIX/bin"
+    if [[ "$PKG_MGR" == homebrew && -w "$PKG_PREFIX/bin" ]]; then printf '%s' "$PKG_PREFIX/bin"
     else printf '%s' "$HOME/.local/bin"; fi
 }
 
-# Build a no-formula tool from upstream git and install the binary onto PATH.
+# Build a no-package tool from upstream git and install the binary onto PATH.
 # Returns 0 only on a fully successful build+install. Needs git + a C toolchain
 # (Xcode Command Line Tools); nbtscan additionally needs autoconf/automake.
 build_from_source() {
@@ -268,7 +353,7 @@ build_from_source() {
                 cp -f "$tmp/s/onesixtyone" "$dest/onesixtyone" && chmod 755 "$dest/onesixtyone" && rc=0
             fi ;;
         nbtscan)
-            have autoreconf || brewsafe install autoconf automake >/dev/null 2>&1 || true
+            have autoreconf || pm_install autoconf automake >/dev/null 2>&1 || true
             if git clone --depth 1 https://github.com/resurrecting-open-source-projects/nbtscan.git "$tmp/s" >/dev/null 2>&1 \
                && ( cd "$tmp/s" && ./autogen.sh >/dev/null 2>&1 && ./configure >/dev/null 2>&1 && make >/dev/null 2>&1 ); then
                 bin="$tmp/s/nbtscan"; [[ -x "$bin" ]] || bin="$tmp/s/src/nbtscan"
@@ -283,8 +368,7 @@ build_from_source() {
 # GNU userland ones need the *GNU* build specifically, and bash needs >= 4.
 dep_present() {
     case "$1" in
-        bash)  [[ -x "$BREW_PREFIX/bin/bash" ]] && \
-                   "$BREW_PREFIX/bin/bash" -c '[ "${BASH_VERSINFO[0]}" -ge 4 ]' 2>/dev/null ;;
+        bash)  [[ -n "$(pkg_bash4)" ]] ;;
         grep)  gnu_grep_ok ;;
         gsed)  have gsed ;;
         gstat) have gstat ;;
@@ -293,28 +377,40 @@ dep_present() {
     esac
 }
 
-# Install every missing dependency via Homebrew (as the user), then enum4linux-ng
+# The pipx of the active manager (prefix bin), else — on Homebrew only, as
+# before — whatever pipx is on PATH.
+pipx_bin() {
+    local p; p="$(pkg_bin pipx)"
+    [[ -z "$p" && "$PKG_MGR" == homebrew ]] && p="$(command -v pipx 2>/dev/null)"
+    printf '%s' "$p"
+}
+
+# Install every missing dependency via the package manager, then enum4linux-ng
 # via pipx. Prints a clear summary of installed / already-present / unavailable.
 install_deps() {
-    if ! ensure_brew_on_path; then
-        if ! bootstrap_homebrew; then
-            echo
-            echo "Cannot install dependencies without Homebrew. Skipping dep install."
-            echo "probesource will still run, but probe tools will be missing until"
-            echo "Homebrew is installed and you re-run: $0 --deps-only"
-            return 1
-        fi
+    if [[ -z "$PKG_LIB" ]]; then
+        echo
+        echo "Cannot install dependencies: lib/pkg.sh from macOS-SecureNetwork-Suite"
+        echo "was not found next to this installer. Run it from the suite checkout."
+        return 1
+    fi
+    if ! ensure_pkg_mgr; then
+        echo
+        echo "Cannot install dependencies without $MGR_LABEL. Skipping dep install."
+        echo "probesource will still run, but probe tools will be missing until"
+        echo "$MGR_LABEL is installed and you re-run: $0 --deps-only"
+        return 1
     fi
 
-    local -a present=() to_install_cmds=() to_install_fmla=()
-    local c fmla
+    local -a present=() to_install_cmds=() to_install_pkg=()
+    local c pkg
     for c in "${DEP_CMDS[@]}"; do
         if dep_present "$c"; then
             present+=("$c")
         else
-            fmla="${DEP_PKG[$c]}"
+            pkg="${DEP_PKG[$c]}"
             to_install_cmds+=("$c")
-            to_install_fmla+=("$fmla")
+            to_install_pkg+=("$pkg")
         fi
     done
 
@@ -322,18 +418,19 @@ install_deps() {
     local want_e4l=0
     have enum4linux-ng && present+=("enum4linux-ng") || want_e4l=1
 
-    # Build-from-source tools that are missing (onesixtyone, nbtscan).
+    # Build-from-source tools that are missing (onesixtyone, nbtscan on Homebrew).
     local -a src_missing=()
     local t
     for t in "${SRC_BUILD[@]}"; do
         if have "$t"; then present+=("$t"); else src_missing+=("$t"); fi
     done
 
-    # Dedupe the formula list (nmap backs nmap+nping, etc. — not an issue here,
-    # but wireshark/samba are single-formula multi-tool).
-    local -a uniq_fmla=()
-    if ((${#to_install_fmla[@]})); then
-        mapfile -t uniq_fmla < <(printf '%s\n' "${to_install_fmla[@]}" | awk 'NF && !seen[$0]++')
+    # Dedupe the generic package list (wireshark/samba are single-package
+    # multi-tool), and resolve this manager's names for display.
+    local -a uniq_pkg=() mgr_names=()
+    if ((${#to_install_pkg[@]})); then
+        mapfile -t uniq_pkg < <(printf '%s\n' "${to_install_pkg[@]}" | awk 'NF && !seen[$0]++')
+        for pkg in "${uniq_pkg[@]}"; do mgr_names+=("$(pkg_name "$pkg")"); done
     fi
 
     echo
@@ -341,15 +438,23 @@ install_deps() {
     printf '  already present: %s\n' "${present[*]:-（none）}"
     if ((${#to_install_cmds[@]})); then
         printf '  to install:      %s\n' "${to_install_cmds[*]}"
-        printf '  brew formulae:   %s\n' "${uniq_fmla[*]}"
+        if [[ "$PKG_MGR" == macports ]]; then
+            printf '  MacPorts ports:  %s\n' "${mgr_names[*]}"
+        else
+            printf '  brew formulae:   %s\n' "${mgr_names[*]}"
+        fi
     else
-        echo "  to install:      （none — all Homebrew deps satisfied）"
+        echo "  to install:      （none — all $MGR_LABEL deps satisfied）"
     fi
     (( want_e4l )) && echo "  via pipx:        enum4linux-ng (git+https://github.com/cddmp/enum4linux-ng.git)"
     (( ${#src_missing[@]} )) && printf '  built from git:  %s\n' "${src_missing[*]}"
-    printf '  no brew formula: %s (skipped by the tool)\n' "${NO_BUILD[*]}"
+    if [[ "$PKG_MGR" == macports ]]; then
+        printf '  not installed:   %s (skipped by the tool)\n' "${NO_BUILD[*]}"
+    else
+        printf '  no brew formula: %s (skipped by the tool)\n' "${NO_BUILD[*]}"
+    fi
 
-    if (( ${#uniq_fmla[@]} == 0 && want_e4l == 0 && ${#src_missing[@]} == 0 )); then
+    if (( ${#uniq_pkg[@]} == 0 && want_e4l == 0 && ${#src_missing[@]} == 0 )); then
         echo
         echo "All installable dependencies are already present. Nothing to do."
         return 0
@@ -359,39 +464,44 @@ install_deps() {
     if [[ "$INTERACTIVE" == 1 && "$DO_DEPS" != 1 ]]; then
         local ans
         echo
-        read -r -p "Install the above now (Homebrew + source builds)? [Y/n] " ans
+        read -r -p "Install the above now ($MGR_LABEL + source builds)? [Y/n] " ans
         case "$ans" in
             [Nn]*) echo "Skipping dependency install."; return 0 ;;
         esac
     fi
 
-    # Install brew formulae (as the normal user).
-    if ((${#uniq_fmla[@]})); then
+    # Install packages (brew as the normal user; port via sudo).
+    if ((${#uniq_pkg[@]})); then
         echo
-        echo "brew install ${uniq_fmla[*]}"
-        brewsafe install "${uniq_fmla[@]}" || \
-            echo "Some formulae may have failed — see brew output above." >&2
+        if [[ "$PKG_MGR" == macports ]]; then
+            pm_install "${uniq_pkg[@]}" || \
+                echo "Some ports may have failed — see port output above." >&2
+        else
+            pm_install "${uniq_pkg[@]}" || \
+                echo "Some formulae may have failed — see brew output above." >&2
+        fi
     fi
 
-    # enum4linux-ng via pipx from upstream git.
+    # enum4linux-ng via the active manager's pipx from upstream git.
     if (( want_e4l )); then
-        if ! have pipx; then brewsafe install pipx >/dev/null 2>&1 || true; fi
-        if have pipx; then
+        local px; px="$(pipx_bin)"
+        if [[ -z "$px" ]]; then pm_install pipx >/dev/null 2>&1 || true; px="$(pipx_bin)"; fi
+        if [[ -n "$px" ]]; then
             echo
             echo "pipx install enum4linux-ng (from git)…"
-            pipx install "git+https://github.com/cddmp/enum4linux-ng.git" || \
+            "$px" install "git+https://github.com/cddmp/enum4linux-ng.git" || \
                 echo "enum4linux-ng install via pipx failed (non-fatal)." >&2
-            pipx ensurepath >/dev/null 2>&1 || true
+            "$px" ensurepath >/dev/null 2>&1 || true
         else
             echo "pipx unavailable — skipping enum4linux-ng." >&2
         fi
     fi
 
-    # Build the no-formula-but-buildable tools from upstream git.
+    # Build the no-package-but-buildable tools from upstream git.
     if ((${#src_missing[@]})); then
         if have git && { have cc || have clang || have gcc; }; then
             echo
-            echo "Building from source (no Homebrew formula): ${src_missing[*]}"
+            echo "Building from source (no $MGR_LABEL $PKG_WORD): ${src_missing[*]}"
             for t in "${src_missing[@]}"; do
                 printf '  %-12s ' "$t"
                 if build_from_source "$t"; then
@@ -419,8 +529,13 @@ install_deps() {
         echo "Still missing (may need a new shell for PATH, or a manual retry):"
         echo "  ${still[*]}"
     fi
-    echo "Reminder — no brew formula and left to the tool's graceful skip: ${NO_BUILD[*]}"
-    echo "  (hping3 is unmaintained / removed from Homebrew; geoiplookup uses the DNS fallback.)"
+    if [[ "$PKG_MGR" == macports ]]; then
+        echo "Reminder — not installed and left to the tool's graceful skip: ${NO_BUILD[*]}"
+        echo "  (hping3 is unmaintained upstream; geoiplookup uses the DNS fallback.)"
+    else
+        echo "Reminder — no brew formula and left to the tool's graceful skip: ${NO_BUILD[*]}"
+        echo "  (hping3 is unmaintained / removed from Homebrew; geoiplookup uses the DNS fallback.)"
+    fi
 }
 
 # Decide whether to run the dependency install this invocation.

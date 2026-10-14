@@ -15,7 +15,8 @@
 # Left alone, because removing them could cut you off or is yours to decide:
 # DNS server settings, the Application Firewall, WARP itself, Homebrew and
 # everything it installed, configuration profiles (remove them in System
-# Settings › General › Device Management), Firefox user.js, and all logs.
+# Settings › General › Device Management on macOS 14+; Privacy & Security › Profiles on 13;
+# System Preferences › Profiles on 11–12), Firefox user.js, and all logs.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 C="$HERE/components"

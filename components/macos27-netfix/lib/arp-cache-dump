@@ -55,8 +55,8 @@ log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG"; }
 fingerprint() {
     printf '%s|%s|%s' "$(sw_vers -buildVersion 2>/dev/null)" \
         "$(sw_vers -productVersionExtra 2>/dev/null)" "$(uname -v)"
-    for b in /opt/homebrew/bin/bash /usr/local/bin/bash \
-             /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    for b in /opt/homebrew/bin/bash /usr/local/bin/bash /opt/local/bin/bash \
+             /opt/homebrew/bin/python3 /usr/local/bin/python3 /opt/local/bin/python3; do
         [ -e "$b" ] && printf '|%s' "$(readlink "$b")"
     done
 }

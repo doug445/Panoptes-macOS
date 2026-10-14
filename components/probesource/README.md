@@ -31,24 +31,58 @@ probesource       # launch the TUI
   inspection, plus firewall history via `log show`). `probesource` caches the
   sudo credential once at startup rather than prompting per-tactic.
   `enum4linux-ng` runs unprivileged.
-- **Homebrew** — the tool bootstraps its probe tools and GNU userland via
-  `brew` on first launch (never as root). Install Homebrew from
-  <https://brew.sh> first if you don't have it.
+- **Package manager** — the tool bootstraps its probe tools and GNU userland on
+  first launch: via `brew` on Apple Silicon (never as root; install Homebrew
+  from <https://brew.sh> first if you don't have it), via `sudo port install` on
+  Intel / OpenCore Legacy Patcher Macs that have MacPorts. See
+  [Requirements](#requirements).
 
 ## Requirements
 
-- **macOS on Apple Silicon or Apple T2 Intel** (the two supported hardware
-  classes; Homebrew prefix is auto-detected at `/opt/homebrew` or `/usr/local`).
-- **Homebrew** — the sole package manager used; it's how every probe tool and the
-  GNU userland get installed.
+- **macOS on Apple Silicon** (primary) or **Intel** — Apple T2, pre-T2 and
+  OpenCore Legacy Patcher Macs (supported, possibly with fewer tools).
+- **A package manager**, chosen by the suite's `lib/pkg.sh`:
+  - **Apple Silicon — Homebrew** under `/opt/homebrew`, always, whatever else is
+    installed. Run as your user, never as root.
+  - **Intel / OCLP — MacPorts** under `/opt/local` if it is installed (prebuilt
+    archives first, source build as a fallback; `port` runs via sudo because the
+    prefix is root-owned), otherwise **Homebrew** under `/usr/local` (works, but
+    Homebrew no longer ships x86_64 bottles, so everything compiles).
+    `SECURENET_PKG=macports` or `SECURENET_PKG=homebrew` forces the choice on
+    Intel; it is ignored on Apple Silicon. `install.sh` offers to install the
+    chosen manager if it is missing (MacPorts from its signed installer).
 - **bash >= 4** — macOS ships bash 3.2, which `probesource` needs to exceed, so
-  the script **re-execs itself under Homebrew bash** (`brew install bash`). The
+  the script **re-execs itself under Homebrew bash** (`brew install bash`), or
+  MacPorts bash at `/opt/local/bin/bash` (`sudo port install bash`). The
   installer warns if it can't find a modern bash.
 - **A GNU userland shim** — `grep` (PCRE `-P`), `gnu-sed` (`\s`), `coreutils`
   (`gstat`, `timeout`, `date`), and `gawk` (IGNORECASE). `probesource` prepends
-  the Homebrew `gnubin` directories to `PATH` and auto-installs any missing
-  backing formula at startup, so the script's pervasive Linux-style text
+  the Homebrew `gnubin` directories to `PATH` (on Intel with MacPorts, also
+  `/opt/local/libexec/gnubin`, ranked below Homebrew's) and auto-installs any
+  missing backing package at startup, so the script's pervasive Linux-style text
   processing behaves identically.
+
+### Package names
+
+Homebrew formula and MacPorts port names differ in a few places:
+
+| Provides | Homebrew | MacPorts |
+| --- | --- | --- |
+| `ggrep` / GNU `grep` | `grep` | `grep` |
+| `gsed` / GNU `sed` | `gnu-sed` | `gsed` |
+| `gstat`, `timeout`, `gdate` | `coreutils` | `coreutils` |
+| `gawk` | `gawk` | `gawk` |
+| `tshark` | `wireshark` | `wireshark4` |
+| `smbclient` | `samba` | `samba4` |
+| `nbtscan` | — (built from git) | `nbtscan` |
+| `onesixtyone` | — (built from git) | — (built from git) |
+| `pipx` (for `enum4linux-ng`) | `pipx` | `pipx` |
+| `bash`, `dialog`, `nmap`, `arp-scan`, `p0f`, `mtr`, `masscan`, `sslscan`, `ike-scan` | same name | same name |
+
+MacPorts installs GNU tools with a `g` prefix (`ggrep`, `gsed`, `gawk`,
+`gstat`, …) and links the unprefixed names into `/opt/local/libexec/gnubin`.
+The arp-scan and nmap OUI databases are read from the Homebrew prefix first,
+then from `/opt/local/share`.
 
 ## macOS port — what changed from Linux
 
@@ -57,7 +91,7 @@ The macOS port maps each of those onto native equivalents:
 
 | Concern | Linux original | macOS port |
 | --- | --- | --- |
-| Package manager | `apt` / `dnf` / `pacman` (+ AUR, source builds) | **Homebrew** (never run as root) |
+| Package manager | `apt` / `dnf` / `pacman` (+ AUR, source builds) | **Homebrew** on Apple Silicon (never run as root); MacPorts or Homebrew on Intel |
 | Routing / neighbors | `ip route`, `ip neigh` | `route -n get`, `arp`, `ndp` |
 | Socket / connection table | `ss -tunap` | `lsof -nP -i`, `netstat -an` |
 | Firewall / kernel drop log | `journalctl -k` (UFW BLOCK / kernel) | `log show --last …` + `/var/log/appfirewall.log` |
@@ -65,7 +99,7 @@ The macOS port maps each of those onto native equivalents:
 | IP set membership | `ipset test` | pf tables — `pfctl -s Tables` / `pfctl -t <t> -T test` |
 | Capture interface | `-i any` pseudo-interface | primary interface from the default route (no `any` on macOS) |
 | Text processing | native `grep -P`, `sed \s`, `stat -c`, `timeout` | GNU userland shim (Homebrew grep/gnu-sed/coreutils/gawk first on `PATH`) |
-| Shell | native bash 4+ | re-exec under Homebrew bash >= 4 (macOS ships 3.2) |
+| Shell | native bash 4+ | re-exec under Homebrew (or MacPorts) bash >= 4 (macOS ships 3.2) |
 | OUI / MAC vendor DB | system IEEE `oui.txt` (hwdata) | downloaded cache + arp-scan/nmap databases (no system IEEE file on macOS); MAC octets zero-padded since `arp`/`ndp` drop leading zeros |
 
 ### Tools with no Homebrew formula
@@ -78,16 +112,19 @@ progress accounting stays correct) rather than erroring:
 - **onesixtyone** (SNMP) — **built from [trailofbits/onesixtyone](https://github.com/trailofbits/onesixtyone)**
   by `install.sh` (a one-file `cc` build). Enables the SNMP community-string tactic.
 - **nbtscan** (NetBIOS) — **built from [resurrecting-open-source-projects/nbtscan](https://github.com/resurrecting-open-source-projects/nbtscan)**
-  by `install.sh` (autotools; it also pulls `autoconf`/`automake`). Enables the
+  by `install.sh` (autotools; it also pulls `autoconf`/`automake`). On MacPorts
+  it is installed from the `nbtscan` port instead. Enables the
   NetBIOS name scan in the SMB tactic, which otherwise falls back to the built-in
-  `smbutil view` plus `smbclient` (from the `samba` formula).
+  `smbutil view` plus `smbclient` (from the `samba` formula / `samba4` port).
 - **hping3** — no formula and **removed from Homebrew** (unmaintained upstream);
   the stealth-sweep and elicitor-flood tactics are skipped.
 - **geoiplookup** (`geoip-bin`) — no formula, but the **GeoIP/ASN tactic has a
   built-in Team Cymru DNS fallback**, so ASN/GeoIP lookups still work for IPv4.
 
 Source builds need `git` + the Xcode Command Line Tools (`xcode-select --install`);
-if those are absent the installer skips the builds and says so. If Homebrew ships
+if those are absent the installer skips the builds and says so. On Homebrew the
+binaries go into the Homebrew `bin` when it is writable; otherwise (and always on
+MacPorts, whose prefix is root-owned) into `~/.local/bin`. If Homebrew ships
 a formula for any of these later, dropping the tool on `PATH` re-enables its
 tactic automatically.
 
@@ -120,7 +157,7 @@ finishes.
 | **S** | Identification summary from a saved log |
 | **M** | Tail the master rolling log live |
 | **U** | Update the OUI vendor database (downloads a fresh IEEE `oui.txt` into the cache) |
-| **D** | Check / install probe-tool dependencies via Homebrew |
+| **D** | Check / install probe-tool dependencies via Homebrew (or MacPorts on Intel) |
 | **Q** | Quit |
 
 ### Picking a target
@@ -154,14 +191,17 @@ Everything is written under **`~/.local/share/probesource/`**:
 - `<ip>-<timestamp>.log` — one per investigation session.
 - `oui-fresh.txt` — downloaded IEEE OUI cache (menu action **U**).
 - `state/` — per-scan progress state for background scans.
-- `dep-install.log`, `gnu-install.log` — Homebrew bootstrap output.
+- `dep-install.log`, `gnu-install.log` — Homebrew / MacPorts bootstrap output.
 
 ## Installer
 
 `install.sh` just drops the single self-contained `probesource` script onto your
 `PATH` — the tool keeps all state under `~/.local/share/probesource` and never
-references the repo at runtime. Dependency bootstrapping is done by the tool
-itself on first launch (menu **D** or the startup check), not by the installer.
+references the repo at runtime. In an interactive terminal it then offers to
+install the probe tools through the suite's `lib/pkg.sh` (Homebrew on Apple
+Silicon; MacPorts, or an existing `/usr/local` Homebrew, on Intel), so it must
+run from the suite checkout for that step. The tool itself can also install
+missing tools later (menu **D** or the one-time startup check).
 
 | Flag | Effect |
 | --- | --- |
@@ -169,9 +209,12 @@ itself on first launch (menu **D** or the startup check), not by the installer.
 | `--system` | Install to `/usr/local/bin` (all users, uses sudo) |
 | `--prefix DIR` | Install into `DIR/probesource` |
 | `--uninstall` | Remove an installed copy (leaves `~/.local/share/probesource` intact) |
+| `--deps-only` | Install/bootstrap dependencies only (no copy) |
+| `--no-deps` | Copy the script only, skip dependency install |
 | `-h`, `--help` | Print usage |
 
-The installer also runs a few sanity checks — it warns if Homebrew is missing, if
-no bash >= 4 is available, or if the install directory isn't on your `PATH` — and
+The installer also runs a few sanity checks — it reports the detected platform
+and package manager, offers to install the manager if it is missing (Homebrew,
+or MacPorts on Intel), warns if the install directory isn't on your `PATH` — and
 offers to launch `probesource` once (in an interactive terminal) to check and
 install probe tools.

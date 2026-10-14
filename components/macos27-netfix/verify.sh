@@ -64,7 +64,7 @@ fi
 
 # --- the real test: can a TAINTED process resolve a MAC? ------------------
 HB=""
-for c in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+for c in /opt/homebrew/bin/bash /usr/local/bin/bash /opt/local/bin/bash; do
     [ -x "$c" ] && { HB="$c"; break; }
 done
 

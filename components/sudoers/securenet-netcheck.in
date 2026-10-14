@@ -2,7 +2,9 @@
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
 # macOS-SecureNetwork-Suite — netcheck: read installed configuration profiles.
-# arp-scan is deliberately NOT here: it lives in a user-writable Homebrew prefix
-# and can write files (-W), so a NOPASSWD rule for it is a root escalation.
-# netcheck/nettop simply prompt for it.
+# arp-scan is NOT here by default: with free arguments it can write files as root
+# (-W), and in a Homebrew prefix the binary itself is user-replaceable — either is a
+# root escalation, so netcheck/nettop simply prompt for it. install.sh appends a rule
+# only when arp-scan and every directory above it are root-owned (MacPorts), and only
+# for the exact argument lists netcheck and nettop use (interface pinned to en<N>).
 @USER@ ALL=(root) NOPASSWD: /usr/bin/profiles show -type configuration

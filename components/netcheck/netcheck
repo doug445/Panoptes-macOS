@@ -90,6 +90,59 @@ else
     echo -e "  ${RED}socketfilterfw not found at $ALF${NC}"
 fi
 
+# Platform integrity — what the OS itself still guarantees. All green on a stock Mac;
+# on OpenCore Legacy Patcher (OCLP) Macs and old releases this says what is missing.
+section "PLATFORM INTEGRITY"
+os_ver=$(sw_vers -productVersion); os_maj=${os_ver%%.*}
+# Apple ships security fixes for the current macOS and the two before it (list as of 2026-10).
+SUPPORTED_MAJORS="27 26 15"
+if [[ " $SUPPORTED_MAJORS " == *" $os_maj "* ]]; then
+    echo -e "  ${GREEN}●${NC} macOS $os_ver — receives Apple security updates"
+else
+    echo -e "  ${RED}●${NC} macOS $os_ver — no longer receives full Apple security updates (supported: $SUPPORTED_MAJORS)"
+fi
+oclp=$(nvram 4D1FDA02-38C7-4A6A-9CC6-4BCCA8B30102:OCLP-Version 2>/dev/null | awk '{print $2}' || true)
+if [[ -n "$oclp" || -d "/Library/Application Support/Dortania" ]]; then
+    echo -e "  ${YELLOW}●${NC} OpenCore Legacy Patcher ${oclp:+$oclp }— unsupported hardware ($(sysctl -n hw.model)); expect reduced protections below"
+    echo -e "    ${YELLOW}↳${NC} A gentle reminder: OCLP trades away protections this suite cannot restore. For a Mac you"
+    echo -e "      depend on, prefer supported hardware, your model's last supported macOS, or Linux."
+fi
+sip=$(csrutil status 2>/dev/null | head -1 || true)
+case "$sip" in
+    *"status: enabled."*) echo -e "  ${GREEN}●${NC} System Integrity Protection: enabled" ;;
+    *"status: disabled"*) echo -e "  ${RED}●${NC} System Integrity Protection: DISABLED — root can modify system files and protected processes" ;;
+    "")                   echo -e "  ${YELLOW}●${NC} System Integrity Protection: unknown" ;;
+    *)                    echo -e "  ${YELLOW}●${NC} System Integrity Protection: custom configuration (partially disabled — typical of OCLP)" ;;
+esac
+ssv=$(csrutil authenticated-root status 2>/dev/null | head -1 || true)
+if [[ "$ssv" == *enabled* ]]; then
+    echo -e "  ${GREEN}●${NC} Signed system volume: sealed"
+elif [[ -n "$ssv" ]]; then
+    echo -e "  ${RED}●${NC} Signed system volume: NOT sealed (root patches modify the system; tampering is no longer detected)"
+fi
+bootargs=$(nvram boot-args 2>/dev/null | cut -f2- || true)
+if [[ "$bootargs" =~ amfi|ipc_control_port_options|cs_enforcement_disable ]]; then
+    echo -e "  ${RED}●${NC} AMFI / code-signing enforcement weakened by boot-args: $bootargs"
+else
+    echo -e "  ${GREEN}●${NC} AMFI: no boot-args disabling code-signing enforcement"
+fi
+sbp=$(nvram 94B73556-2197-4702-82A8-3E1337DAFBFB:AppleSecureBootPolicy 2>/dev/null | awk '{print $2}' || true)
+case "$sbp" in   # T2 Macs only; earlier Intel Macs have no Secure Boot
+    %02) echo -e "  ${GREEN}●${NC} Secure Boot (T2): Full Security" ;;
+    %01) echo -e "  ${YELLOW}●${NC} Secure Boot (T2): Medium Security" ;;
+    %00) echo -e "  ${RED}●${NC} Secure Boot (T2): No Security" ;;
+esac
+if spctl --status 2>/dev/null | grep -q 'assessments enabled'; then
+    echo -e "  ${GREEN}●${NC} Gatekeeper: enabled"
+else
+    echo -e "  ${RED}●${NC} Gatekeeper: DISABLED — unsigned apps run without warning"
+fi
+if fdesetup status 2>/dev/null | grep -q 'FileVault is On'; then
+    echo -e "  ${GREEN}●${NC} FileVault: on"
+else
+    echo -e "  ${YELLOW}●${NC} FileVault: $(fdesetup status 2>/dev/null | head -1)"
+fi
+
 # Listening ports
 section "LISTENING PORTS"
 if command -v lsof &>/dev/null; then
@@ -134,6 +187,10 @@ fi
 # DNS
 section "DNS"
 wifi_iface=$(networksetup -listallhardwareports 2>/dev/null | awk '/Hardware Port: Wi-Fi/{getline;print $2;exit}')
+# Interface for LAN scans: the one carrying the default route (Ethernet-only Macs, or Wi-Fi
+# that is not en0 — 2012-2017 iMacs/minis), falling back to the Wi-Fi interface.
+lan_iface=$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}' || true)
+[[ "$lan_iface" == en* ]] || lan_iface="$wifi_iface"
 
 # Primary resolver from scutil
 echo -e "  ${BOLD}Active resolvers (scutil):${NC}"
@@ -182,7 +239,7 @@ gateway_ip=$(route -n get default 2>/dev/null | awk '/gateway:/{print $2; exit}'
 
 arp_output=""
 if command -v arp-scan &>/dev/null; then
-    arp_output=$(sudo arp-scan --interface="$wifi_iface" --localnet --ignoredups 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n || true)
+    arp_output=$(sudo arp-scan --interface="$lan_iface" --localnet --ignoredups 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n || true)
 fi
 
 if [[ -n "$arp_output" ]]; then
@@ -218,7 +275,8 @@ fi
 # Top drop sources — parse unified log (same source as "recent drops" above), enrich with MAC/vendor/rDNS
 section "TOP DROP SOURCES"
 OUI=""
-for cand in /opt/homebrew/share/hwdata/oui.txt /usr/local/share/hwdata/oui.txt /opt/homebrew/share/nmap/nmap-mac-prefixes; do
+for cand in /opt/homebrew/share/hwdata/oui.txt /usr/local/share/hwdata/oui.txt /opt/homebrew/share/nmap/nmap-mac-prefixes \
+            /usr/local/share/nmap/nmap-mac-prefixes /opt/local/share/nmap/nmap-mac-prefixes /opt/local/share/arp-scan/ieee-oui.txt; do
     [[ -r "$cand" ]] && { OUI="$cand"; break; }
 done
 
@@ -242,7 +300,7 @@ if [[ -n "$drop_ips" ]]; then
             [[ -n "$sip" ]] || continue
             lan_mac[$sip]="$smac"
             lan_vendor[$sip]="$svendor"
-        done < <(sudo arp-scan --interface="$wifi_iface" --localnet --ignoredups 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
+        done < <(sudo arp-scan --interface="$lan_iface" --localnet --ignoredups 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' || true)
     fi
     echo "$drop_ips" | while read -r count ip; do
         [[ -z "$ip" ]] && continue
@@ -295,6 +353,8 @@ if [[ -n "$wifi_iface" ]]; then
         first_dec=$((16#${first_octet}))
         if (( first_dec & 0x02 )); then
             echo -e "  Status: ${GREEN}Locally Administered${NC} — Private Wi-Fi Address is active"
+        elif (( ${os_maj:-0} < 15 )); then
+            echo -e "  Status: ${YELLOW}Universal (hardware MAC)${NC} — Private Wi-Fi Address needs macOS 15+; not available on $os_ver"
         else
             echo -e "  Status: ${RED}Universal (hardware MAC exposed)${NC}"
             echo -e "  ${YELLOW}!${NC} Enable: System Settings → Wi-Fi → (network) → Details → Private Wi-Fi Address = Rotating"

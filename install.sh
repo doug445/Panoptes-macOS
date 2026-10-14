@@ -19,8 +19,16 @@
 #   ./install.sh --list              list components and exit
 #   ./uninstall.sh                   reverse it
 #
+# PLATFORMS
+#   Apple Silicon is the primary platform: Homebrew, every component, unchanged.
+#   Intel Macs — including OpenCore Legacy Patcher (OCLP) Macs — are supported in a
+#   degraded mode: MacPorts (or an existing Homebrew), and on macOS older than 14 the
+#   current Cloudflare WARP and ProtonVPN releases cannot install, so the tunnel
+#   components are skipped while DNS, firewall, monitoring and the menu still work.
+#   See lib/pkg.sh.
+#
 # COMPONENTS (run in this order)
-#   deps         Homebrew (+ Xcode CLT), formulae, casks, probesource probe tools
+#   deps         package manager (+ Xcode CLT), tools, apps, probesource probe tools
 #   firewall     Application Firewall on + stealth mode + logging (netwatch input)
 #   dns          AdGuard DNS (no-log/no-ECS) + Quad9/Cloudflare fallback
 #   sudoers      NOPASSWD rules for the menu's DNS toggle and netcheck
@@ -46,13 +54,15 @@ fi
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 C="$HERE/components"
+# shellcheck source=lib/pkg.sh
+. "$HERE/lib/pkg.sh"
 ALL="deps firewall dns sudoers warp killswitch netfix netwatch netcheck probesource shell profiles firefox"
 
 ADGUARD_DNS="94.140.14.140 94.140.14.141"
-FALLBACK1="9.9.9.9"; FALLBACK2="1.1.1.1"
+FALLBACK1="9.9.9.9"; FALLBACK2="1.1.1.2"   # Quad9; Cloudflare malware-blocking (both validate DNSSEC)
 DOH_URL="https://dns.adguard-dns.com/dns-query"   # DoH target for Chromium (policy) and Firefox (TRR)
 DOH_BOOTSTRAP="94.140.14.14"                       # its IP, for Firefox bootstrap
-# per-machine overrides, also read by the menu-bar plugin, e.g. FALLBACK2=1.1.1.2 or an
+# per-machine overrides, also read by the menu-bar plugin, e.g. FALLBACK2=1.1.1.1 (unfiltered) or an
 # AdGuard DNS account resolver: DOH_URL=https://d.adguard-dns.com/dns-query/<device-id> DOH_BOOTSTRAP=94.140.14.49
 DNS_CONF="$HOME/.config/macos-securenetwork-suite/dns.conf"
 # shellcheck source=/dev/null
@@ -60,10 +70,12 @@ DNS_CONF="$HOME/.config/macos-securenetwork-suite/dns.conf"
 FALLBACK_DNS="$FALLBACK1 $FALLBACK2"
 render() { sed -e "s|@USER@|$USER|g" -e "s|@DOH_URL@|$DOH_URL|g" -e "s|@DOH_BOOTSTRAP@|$DOH_BOOTSTRAP|g" "$1"; }   # fill a .in template
 
-FORMULAE="bash nmap arp-scan watch speedtest-go"
-# Casks are skipped when their app is already in /Applications — brew refuses
-# to adopt an app it did not install itself.
-CASKS="cloudflare-warp xbar protonvpn"
+# Generic names; lib/pkg.sh maps them per manager (speedtest -> speedtest-go on Homebrew,
+# speedtest-cli on MacPorts).
+FORMULAE="bash nmap arp-scan watch speedtest"
+# Apps are skipped when already in /Applications. Homebrew installs them as casks;
+# without Homebrew they come from the vendor, signature-checked against the Team ID.
+APPS="Cloudflare WARP|xbar|ProtonVPN"
 
 SHELL_DIR="$HOME/.config/macos-securenetwork-suite"
 BIN="$HOME/.local/bin"
@@ -75,6 +87,13 @@ ylw() { printf '\033[33m%s\033[0m\n' "$*"; }
 hdr() { printf '\n\033[1;36m══ %s ══\033[0m\n' "$*"; }
 die() { red "ERROR: $*"; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+# Where profiles are approved: System Preferences (11–12), System Settings (13), and
+# System Settings › General › Device Management (14+).
+profiles_pane() {
+    if os_at_least 14.0; then echo "System Settings › General › Device Management"
+    elif os_at_least 13.0; then echo "System Settings › Privacy & Security › Profiles"
+    else echo "System Preferences › Profiles"; fi
+}
 
 # ---- args -------------------------------------------------------------------
 ONLY=""; SKIP=""; NO_DEPS=0
@@ -100,11 +119,40 @@ want() {
 
 # ---- preflight --------------------------------------------------------------
 [ "$(uname -s)" = Darwin ] || die "macOS only."
-[ "$(id -u)" -ne 0 ] || die "run as your normal user, not root (Homebrew refuses root)."
-case "$(uname -m)" in arm64) BREW_PREFIX=/opt/homebrew ;; *) BREW_PREFIX=/usr/local ;; esac
+[ "$(id -u)" -ne 0 ] || die "run as your normal user, not root (it asks for sudo when needed)."
+pkg_detect || die "package-manager detection failed."
+TIER=full; [ "$ARCH" = arm64 ] || TIER=degraded
 hdr "macOS-SecureNetwork-Suite"
-echo "  macOS $(sw_vers -productVersion) ($(uname -m)), user $USER, Homebrew prefix $BREW_PREFIX"
+echo "  macOS $OS_VER ($ARCH), user $USER, packages: $PKG_MGR ($PKG_PREFIX)"
+if [ "$TIER" = degraded ]; then
+    ylw "  Intel Mac$(is_oclp && echo ' running OpenCore Legacy Patcher'): supported in degraded mode (see install.sh header)."
+    os_at_least 14.0 || ylw "  macOS $OS_VER: current WARP/ProtonVPN releases need macOS 14+ — tunnel components will be skipped."
+fi
 echo "  components: $(for c in $ALL; do want "$c" && printf '%s ' "$c"; done)"
+
+# ---- layout changes (e.g. an Intel Mac's home folder migrated to Apple Silicon) ------
+# The layout is CPU + package manager + prefix. Every piece that embeds it (bash-4
+# shebangs, the netwatch LaunchAgent, sudoers, the kill-switch helper location and menu,
+# probesource) is regenerated from the repo on install, so updating across a layout
+# change is the same `git pull && ./install.sh` as any update: the installer notices,
+# says so, re-runs every layout-dependent component even under --only, and audits the
+# result for paths left over from the old layout.
+LAYOUT_STATE="$HOME/.local/state/macos-securenetwork-suite/layout"
+LAYOUT="$ARCH $PKG_MGR $PKG_PREFIX"
+PREV_LAYOUT=$(cat "$LAYOUT_STATE" 2>/dev/null || true)
+LAYOUT_COMPS="sudoers killswitch netwatch netcheck probesource"
+CONVERTING=0
+if [ -n "$PREV_LAYOUT" ] && [ "$PREV_LAYOUT" != "$LAYOUT" ]; then
+    CONVERTING=1
+    ylw "  Layout changed since the last install: [$PREV_LAYOUT] -> [$LAYOUT]"
+    ylw "  Converting: every layout-dependent component is regenerated for this Mac."
+    if [ -n "$ONLY" ]; then
+        for c in $LAYOUT_COMPS; do case " $ONLY " in *" $c "*) ;; *) ONLY="$ONLY $c" ;; esac; done
+    fi
+    for c in $LAYOUT_COMPS; do
+        case " $SKIP " in *" $c "*) ylw "  WARNING: --skip $c keeps that component on the old layout" ;; esac
+    done
+fi
 
 # One password prompt, then keep the timestamp fresh for the whole run.
 sudo -v || die "sudo is required."
@@ -115,10 +163,6 @@ trap 'kill $KEEPALIVE 2>/dev/null' EXIT
 FAILED=""
 fail() { red "  ✗ $*"; FAILED="$FAILED\n  - $*"; }
 
-brew_env() {
-    [ -x "$BREW_PREFIX/bin/brew" ] && eval "$("$BREW_PREFIX/bin/brew" shellenv)"
-    have brew
-}
 
 # Copy SRC to DEST, keeping a dated backup if DEST exists and differs.
 put() {
@@ -131,11 +175,12 @@ put() {
 }
 
 # Bash-4 scripts are shipped with an Apple-silicon shebang; point it at this
-# machine's Homebrew bash.
+# machine's bash >= 4 (Homebrew's or MacPorts'). Unchanged on Apple Silicon.
 put_bash4() {
-    local tmp
+    local tmp b4
+    b4=$(pkg_bash4); [ -n "$b4" ] || b4="$PKG_PREFIX/bin/bash"
     tmp=$(mktemp)
-    sed "1s|^#!/opt/homebrew/bin/bash|#!$BREW_PREFIX/bin/bash|" "$1" > "$tmp"
+    sed "1s|^#!/opt/homebrew/bin/bash|#!$b4|" "$1" > "$tmp"
     put "$tmp" "$2" 755
     rm -f "$tmp"
 }
@@ -143,43 +188,32 @@ put_bash4() {
 # ---- deps -------------------------------------------------------------------
 if want deps; then
     hdr "Dependencies"
-    if ! brew_env; then
-        ylw "  Homebrew not found — installing (also installs the Xcode Command Line Tools)"
-        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
-            || die "Homebrew install failed."
-        brew_env || die "Homebrew installed but brew is not on PATH."
-    fi
-    grn "  Homebrew: $(brew --version | head -1)"
+    case "$PKG_MGR" in
+        homebrew) have brew || ylw "  Homebrew not found — installing (also installs the Xcode Command Line Tools)" ;;
+        macports) [ -x /opt/local/bin/port ] || ylw "  MacPorts not found — installing the signed release for macOS $OS_VER" ;;
+    esac
+    pkg_bootstrap || die "$PKG_MGR install failed."
+    case "$PKG_MGR" in
+        homebrew) grn "  Homebrew: $(brew --version | head -1)" ;;
+        macports) grn "  MacPorts: $(/opt/local/bin/port version 2>/dev/null)" ;;
+    esac
 
-    missing=""
-    for f in $FORMULAE; do brew list --formula "$f" >/dev/null 2>&1 || missing="$missing $f"; done
-    if [ -n "$missing" ]; then
-        echo "  brew install$missing"
-        brew install $missing || fail "brew install$missing"
-    else
-        grn "  formulae present: $FORMULAE"
-    fi
+    # shellcheck disable=SC2086  # word splitting is the package list
+    if pkg_install $FORMULAE; then grn "  tools present: $FORMULAE"; else fail "$PKG_MGR install of some tools (see above)"; fi
 
-    for cask in $CASKS; do
-        case "$cask" in
-            cloudflare-warp) app="Cloudflare WARP" ;;
-            xbar)            app="xbar" ;;
-            protonvpn)       app="ProtonVPN" ;;
-        esac
-        if [ -d "/Applications/$app.app" ]; then
-            grn "  $app.app present"
-        else
-            echo "  brew install --cask $cask"
-            brew install --cask "$cask" || fail "brew install --cask $cask"
-        fi
+    _ifs=$IFS; IFS='|'
+    for app in $APPS; do
+        IFS=$_ifs
+        app_install "$app"; rc=$?
+        case $rc in 0|2) ;; *) fail "install $app" ;; esac     # 2 = not supported on this macOS
+        IFS='|'
     done
+    IFS=$_ifs
 
     if want probesource; then
         echo "  probesource probe toolset (nmap, tshark, p0f, masscan, ... + GNU userland)"
         bash "$C/probesource/install.sh" --deps-only </dev/null || fail "probesource dependencies"
     fi
-else
-    brew_env >/dev/null 2>&1 || true
 fi
 
 # ---- firewall ---------------------------------------------------------------
@@ -213,6 +247,13 @@ if want sudoers; then
     for name in securenet-dns securenet-netcheck; do
         tmp=$(mktemp)
         sed "s|@USER@|$USER|g" "$C/sudoers/$name.in" > "$tmp"
+        # arp-scan: only with a root-owned binary in a root-owned prefix (MacPorts), and only
+        # the exact invocations netcheck/nettop use — never free arguments (-W writes files).
+        if [ "$name" = securenet-netcheck ] && ARPSCAN=$(pkg_bin arp-scan) && [ -n "$ARPSCAN" ] && pkg_root_owned "$ARPSCAN"; then
+            printf '%s ALL=(root) NOPASSWD: %s --interface=en[0-9] --localnet --ignoredups, %s --interface=en[1-9][0-9] --localnet --ignoredups, %s --localnet --ignoredups\n' \
+                "$USER" "$ARPSCAN" "$ARPSCAN" "$ARPSCAN" >> "$tmp"
+            grn "  arp-scan is root-owned ($ARPSCAN) — pinned NOPASSWD rule added"
+        fi
         if sudo /usr/sbin/visudo -cf "$tmp" >/dev/null; then
             sudo /usr/bin/install -m 0440 -o root -g wheel "$tmp" "/etc/sudoers.d/$name" \
                 && grn "  /etc/sudoers.d/$name"
@@ -227,8 +268,10 @@ fi
 if want warp; then
     hdr "Cloudflare WARP"
     WARP=/usr/local/bin/warp-cli
-    if [ ! -x "$WARP" ]; then
-        fail "warp-cli not found (install the cloudflare-warp cask: run with the deps component)"
+    if [ ! -x "$WARP" ] && ! os_at_least 14.0; then
+        ylw "  Cloudflare WARP is not available for macOS $OS_VER — skipped (DNS, firewall and monitors still apply)"
+    elif [ ! -x "$WARP" ]; then
+        fail "warp-cli not found (install Cloudflare WARP: run with the deps component)"
     else
         # Wait for the daemon a fresh install starts.
         for _ in 1 2 3 4 5 6 7 8 9 10; do "$WARP" --accept-tos status >/dev/null 2>&1 && break; sleep 2; done
@@ -274,13 +317,13 @@ fi
 # ---- netwatch ---------------------------------------------------------------
 if want netwatch; then
     hdr "netwatch"
-    [ -x "$BREW_PREFIX/bin/bash" ] || fail "Homebrew bash missing — netwatch needs bash >= 4"
+    BASH4=$(pkg_bash4); [ -n "$BASH4" ] || fail "no bash >= 4 in $PKG_PREFIX — netwatch needs it (install the deps component)"
     put_bash4 "$C/netwatch/netwatch" "$BIN/netwatch"
     put_bash4 "$C/netwatch/nettop"   "$BIN/nettop"
     mkdir -p "$HOME/.local/share/netwatch" "$HOME/Library/LaunchAgents"
     PL="$HOME/Library/LaunchAgents/com.netwatch.plist"
     tmp=$(mktemp)
-    sed -e "s|@BASH@|$BREW_PREFIX/bin/bash|" -e "s|@HOME@|$HOME|g" "$C/netwatch/com.netwatch.plist.in" > "$tmp"
+    sed -e "s|@BASH@|${BASH4:-$PKG_PREFIX/bin/bash}|" -e "s|@HOME@|$HOME|g" "$C/netwatch/com.netwatch.plist.in" > "$tmp"
     plutil -lint "$tmp" >/dev/null || fail "generated com.netwatch.plist is invalid"
     put "$tmp" "$PL" 644; rm -f "$tmp"
     launchctl bootout "gui/$(id -u)/com.netwatch" 2>/dev/null
@@ -362,7 +405,7 @@ if want profiles; then
         if printf '%s\n' "$installed_ids" | grep -qxF "$id"; then
             if [ "$p" = chrome-doh-policy ] && ! grep -qF "<string>$DOH_URL</string>" "$usr_plist"; then
                 open "$f"
-                ylw "  $p installed but its DoH target changed — re-approve it in System Settings › General › Device Management"
+                ylw "  $p installed but its DoH target changed — re-approve it in $(profiles_pane)"
             else
                 grn "  $p installed ($id)"
             fi
@@ -371,8 +414,8 @@ if want profiles; then
             echo "    (to switch to AdGuard public DoH, remove that profile and open $f)"
         else
             open "$f"
-            ylw "  $p queued — approve it in System Settings › General › Device Management"
-            [ "$p" = AdGuard-DoH ] && echo "    (device-level profile: Device Management asks for an administrator password)"
+            ylw "  $p queued — approve it in $(profiles_pane)"
+            [ "$p" = AdGuard-DoH ] && echo "    (device-level profile: approving it asks for an administrator password)"
         fi
     done
     rm -rf "$prof_tmp"
@@ -414,11 +457,43 @@ fi
 
 # ---- summary ----------------------------------------------------------------
 hdr "Verify"
-[ -x /usr/local/bin/warp-killswitch ] && sudo /usr/local/bin/warp-killswitch status 2>/dev/null | sed 's/^/  /'
+# Paths from another layout left in anything the suite installed (after a conversion
+# they would mean a component was skipped; on a normal run this is a cheap sanity check).
+case "$PKG_MGR:$ARCH" in
+    homebrew:arm64) foreign='/opt/local/|/usr/local/bin/bash' ;;
+    homebrew:*)     foreign='/opt/local/|/opt/homebrew/' ;;
+    macports:*)     foreign='/opt/homebrew/|/usr/local/bin/bash' ;;
+esac
+stale=""
+for f in "$BIN/netwatch" "$BIN/nettop" "$BIN/netcheck" "$BIN/probesource" \
+         "$HOME/Library/LaunchAgents/com.netwatch.plist"; do
+    [ -f "$f" ] || continue
+    if [ "$f" = "$HOME/Library/LaunchAgents/com.netwatch.plist" ]; then
+        bad=$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$f" 2>/dev/null | grep -E "$foreign" || true)
+    else
+        bad=$(head -1 "$f" | grep -E "$foreign" || true)
+    fi
+    [ -n "$bad" ] && stale="$stale\n    $f: $bad"
+done
+if sudo grep -qE "$foreign" /etc/sudoers.d/securenet-netcheck 2>/dev/null; then stale="$stale\n    /etc/sudoers.d/securenet-netcheck"; fi
+if [ "$ARCH" = arm64 ] && [ -e /Library/PrivilegedHelperTools/warp-killswitch ]; then
+    stale="$stale\n    /Library/PrivilegedHelperTools/warp-killswitch (Intel-era helper copy)"
+fi
+if [ -n "$stale" ]; then
+    fail "paths from another layout remain (re-run without --only/--skip):$(printf '%b' "$stale")"
+else
+    grn "  layout audit clean: everything installed matches [$LAYOUT]"
+    [ "$CONVERTING" -eq 1 ] && grn "  converted from [$PREV_LAYOUT]"
+fi
+for KS in /Library/PrivilegedHelperTools/warp-killswitch /usr/local/bin/warp-killswitch; do
+    [ -x "$KS" ] && [ ! -L "$KS" ] && { sudo "$KS" status 2>/dev/null | sed 's/^/  /'; break; }
+done
 [ -f "$HOME/Library/LaunchAgents/com.netwatch.arpcache.plist" ] && /bin/sh "$C/macos27-netfix/verify.sh" | sed 's/^/  /'
 echo
 if [ -n "$FAILED" ]; then
     red "Finished with problems:"; printf '%b\n' "$FAILED"; exit 1
 fi
-grn "macOS-SecureNetwork-Suite installed."
+mkdir -p "$(dirname "$LAYOUT_STATE")" && printf '%s\n' "$LAYOUT" > "$LAYOUT_STATE"
+grn "macOS-SecureNetwork-Suite installed ($TIER mode, $PKG_MGR)."
+[ "$TIER" = degraded ] && ylw "  Degraded mode: run netcheck — its PLATFORM INTEGRITY section shows what this Mac lacks."
 echo "  Menu bar: xbar › Security Toggle     CLI: netcheck · checkdns · nettop · probesource"
