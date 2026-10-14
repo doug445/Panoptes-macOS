@@ -16,7 +16,7 @@ jobs:
     name: shellcheck (bash + sh tools)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
@@ -59,7 +59,7 @@ jobs:
     name: zsh syntax (shell component)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install zsh
         run: sudo apt-get update && sudo apt-get install -y zsh
       - name: zsh -n
@@ -72,7 +72,7 @@ jobs:
     name: property lists and profiles are well-formed XML
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install libxml2
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils
       - name: xmllint
@@ -85,7 +85,7 @@ jobs:
     name: license headers
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Every tool carries an SPDX MIT header
         run: |
           missing=0
