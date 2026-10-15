@@ -27,13 +27,13 @@ echo
 # --- locate a non-Apple binary to test with -------------------------------
 # Homebrew lives in /opt/homebrew on Apple silicon, /usr/local on Intel.
 HB=""
-for c in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+for c in /opt/homebrew/bin/bash /usr/local/bin/bash /opt/local/bin/bash; do
     [ -x "$c" ] && { HB="$c"; break; }
 done
 
 if [ -z "$HB" ]; then
     echo "  No Homebrew bash found. Checking Homebrew python3 instead..."
-    for c in /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+    for c in /opt/homebrew/bin/python3 /usr/local/bin/python3 /opt/local/bin/python3; do
         [ -x "$c" ] && { HB="$c"; break; }
     done
     if [ -z "$HB" ]; then

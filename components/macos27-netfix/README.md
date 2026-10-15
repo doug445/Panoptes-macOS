@@ -1,15 +1,15 @@
 # macOS 27 network-enumeration fix
 
-**For Claude.** Read this fully before touching anything. It exists so you do
-not have to rediscover a two-hour diagnosis, and so you do not repeat two dead
-ends that look correct and are not.
+Read this fully before changing anything here. It exists so that nobody has
+to rediscover a two-hour diagnosis, or repeat two dead ends that look correct
+and are not.
 
 Origin: found and fixed 2026-08-07, macOS 27.0 build
 26A5388g (Golden Gate public beta 2), Apple silicon.
 
 ---
 
-## What the user will report
+## What you will see
 
 One or more of:
 

@@ -59,10 +59,10 @@ policy profile overrides that. Check `chrome://policy` for
 
 ## A tool reports an empty ARP table / netstat shows nothing (macOS 27)
 
-Run `components/macos27-netfix/detect.sh` from `/bin/sh` (not Homebrew bash).
+Run `components/macos27-netfix/detect.sh` from `/bin/sh` (not Homebrew's or MacPorts' bash).
 If AFFECTED, `./install.sh --only netfix`, then `components/macos27-netfix/verify.sh`.
 `lsof` is unaffected and is the substitute for `netstat -an`.
-Never test `arp` behaviour from Homebrew bash — it is blind there.
+Never test `arp` behaviour from a Homebrew or MacPorts bash — it is blind there.
 
 ## netwatch notification every ~30 seconds
 
@@ -107,3 +107,26 @@ resolver (the account profile) is fine. Set `DOH_URL` and `DOH_BOOTSTRAP` in
 `~/.config/macos-securenetwork-suite/dns.conf` to the account resolver, run
 `./install.sh --only profiles,firefox`, re-approve the Chromium profile and
 restart Firefox. See the FAQ in the README.
+
+## Intel and OpenCore Legacy Patcher Macs
+
+- **"Cloudflare WARP needs macOS 14+ — skipped."** Current WARP and ProtonVPN
+  releases require macOS 14. On macOS 11–13 the installer skips WARP (and picks
+  the newest ProtonVPN that still supports the OS, if one exists); DNS, the
+  DoH profiles, the firewall, netwatch and netcheck all still apply.
+- **The ProtonVPN menu items never click anything (OCLP).** With AMFI disabled,
+  macOS sometimes never shows the Accessibility prompt, or forgets the grant.
+  Add xbar by hand in *System Settings › Privacy & Security › Accessibility*
+  (*System Preferences › Security & Privacy › Privacy* on 11–12); if it still
+  will not stick, use the ProtonVPN app directly — the menu already falls back
+  to bringing the app forward and telling you what to click.
+- **netcheck shows red under PLATFORM INTEGRITY.** On an OCLP Mac that is
+  expected and accurate: SIP, the sealed system volume, AMFI and Secure Boot are
+  what OCLP trades for running a newer macOS. It is the honest baseline, not a
+  fault in the suite.
+- **"Private Wi-Fi Address needs macOS 15+".** Per-network private addresses
+  arrived in macOS 15; earlier releases, and legacy Wi-Fi cards restored by OCLP
+  root patches, use the hardware address.
+- **Everything compiles on Intel Homebrew.** Homebrew stopped building x86_64
+  bottles in September 2026. Install MacPorts (or let the installer do it with
+  `SECURENET_PKG=macports ./install.sh`) to get prebuilt packages.

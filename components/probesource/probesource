@@ -72,24 +72,33 @@ arp_mac_for_ip() {
 # enum, SNMP (onesixtyone), IKE/IPsec (ike-scan), hping3 stealth/flood scans.
 #
 # Platform notes (differences from the Linux original):
-#   * Requires bash >= 4 — macOS ships 3.2, so this re-execs under Homebrew bash.
-#   * Uses a GNU userland shim (Homebrew grep/gnu-sed/coreutils/gawk on PATH) so
-#     the pervasive `grep -oP`, `sed …\s…`, `stat -c`, `timeout`, gawk IGNORECASE
-#     all behave as on Linux. These are auto-installed at startup if missing.
+#   * Requires bash >= 4 — macOS ships 3.2, so this re-execs under Homebrew bash
+#     (or MacPorts bash on Intel Macs that use MacPorts).
+#   * Uses a GNU userland shim (Homebrew grep/gnu-sed/coreutils/gawk on PATH, or
+#     MacPorts' /opt/local/libexec/gnubin) so the pervasive `grep -oP`,
+#     `sed …\s…`, `stat -c`, `timeout`, gawk IGNORECASE all behave as on Linux.
+#     These are auto-installed at startup if missing.
 #   * Linux `ip/ss/journalctl/conntrack/ipset/UFW` → macOS `route/arp/ndp/lsof/
 #     netstat/log show/pfctl`. Captures target the primary interface, not `any`.
-#   * Package manager is Homebrew (never run as root). Some tools (nbtscan,
-#     onesixtyone, hping3) have no brew formula and are gated/skipped cleanly.
+#   * Package manager: Homebrew on Apple Silicon (always; never run as root). On
+#     Intel / OpenCore Legacy Patcher Macs, MacPorts (/opt/local, installs via
+#     sudo) when present, else Homebrew at /usr/local; SECURENET_PKG=macports|
+#     homebrew forces the choice there. Some tools (nbtscan, onesixtyone, hping3)
+#     have no brew formula and are gated/skipped cleanly.
 #
 # Most tactics escalate via sudo (cached at startup); brew installs run as you.
 
 # ── bash >= 4 guard (macOS /bin/bash is 3.2; re-exec under a modern bash) ─────
 if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
-    for _b in /opt/homebrew/bin/bash /usr/local/bin/bash "$(command -v bash 2>/dev/null)"; do
+    for _b in /opt/homebrew/bin/bash /usr/local/bin/bash /opt/local/bin/bash "$(command -v bash 2>/dev/null)"; do
         [ -n "$_b" ] && [ -x "$_b" ] && "$_b" -c '[ "${BASH_VERSINFO[0]}" -ge 4 ]' 2>/dev/null \
             && exec "$_b" "$0" "$@"
     done
-    echo "probesource needs bash >= 4. Install it with:  brew install bash" >&2
+    if [ "$(/usr/bin/uname -m)" != arm64 ] && [ -x /opt/local/bin/port ]; then
+        echo "probesource needs bash >= 4. Install it with:  sudo port install bash" >&2
+    else
+        echo "probesource needs bash >= 4. Install it with:  brew install bash" >&2
+    fi
     exit 1
 fi
 
@@ -100,6 +109,14 @@ fi
 BREW_PREFIX="${HOMEBREW_PREFIX:-}"
 [ -z "$BREW_PREFIX" ] && BREW_PREFIX="$(command -v brew >/dev/null 2>&1 && brew --prefix 2>/dev/null)"
 [ -z "$BREW_PREFIX" ] && { [ -d /opt/homebrew ] && BREW_PREFIX=/opt/homebrew || BREW_PREFIX=/usr/local; }
+# MacPorts (Intel / OCLP only — Apple Silicon is Homebrew-only): one shared
+# gnubin dir for grep/gsed/coreutils/gawk/findutils. Prepended FIRST so the
+# Homebrew dirs below still win wherever both exist.
+if [ "$(/usr/bin/uname -m)" != arm64 ] && [ -d /opt/local/bin ]; then
+    for _d in /opt/local/bin /opt/local/libexec/gnubin; do
+        case ":$PATH:" in *":$_d:"*) ;; *) PATH="$_d:$PATH" ;; esac
+    done
+fi
 for _gb in grep gnu-sed coreutils gawk findutils; do
     _d="$BREW_PREFIX/opt/$_gb/libexec/gnubin"
     case ":$PATH:" in *":$_d:"*) ;; *) PATH="$_d:$PATH" ;; esac
@@ -117,9 +134,14 @@ NW_LOG="${HOME}/.local/share/netwatch/events.log"
 # (shipped by the Homebrew formulae) are what make vendor lookup work here.
 OUI_CACHE="${HOME}/.local/share/probesource/oui-fresh.txt"
 OUI=/nonexistent/oui.txt   # macOS ships no system IEEE file; cache/db cover it
+# Homebrew locations first, then MacPorts (/opt/local); first readable wins.
 OUI_ARPSCAN="$BREW_PREFIX/share/arp-scan/ieee-oui.txt"
 [[ -r "$OUI_ARPSCAN" ]] || OUI_ARPSCAN="$BREW_PREFIX/opt/arp-scan/share/arp-scan/ieee-oui.txt"
+[[ -r "$OUI_ARPSCAN" || ! -r /opt/local/share/arp-scan/ieee-oui.txt ]] \
+    || OUI_ARPSCAN=/opt/local/share/arp-scan/ieee-oui.txt
 OUI_NMAP="$BREW_PREFIX/share/nmap/nmap-mac-prefixes"
+[[ -r "$OUI_NMAP" || ! -r /opt/local/share/nmap/nmap-mac-prefixes ]] \
+    || OUI_NMAP=/opt/local/share/nmap/nmap-mac-prefixes
 mkdir -p "$LOG_DIR"
 
 # Per-target session log (set in main loop) and rolling master log.
@@ -169,12 +191,56 @@ CAP_IF="$PRIMARY_IF"   # macOS tcpdump/tshark/p0f have no "any" pseudo-interface
 # ── helpers ──────────────────────────────────────────────────────────────────
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# ── dependency management (Homebrew) ─────────────────────────────────────────
-# macOS has one package manager for our purposes: Homebrew. It must never run as
-# root, so installs go through `brew` directly (no sudo), unlike the privileged
-# runtime tactics which use `sudo -n`.
+# ── dependency management (Homebrew / MacPorts) ──────────────────────────────
+# Apple Silicon: Homebrew, always. It must never run as root, so installs go
+# through `brew` directly (no sudo), unlike the privileged runtime tactics which
+# use `sudo -n`. Intel / OCLP: MacPorts when /opt/local/bin/port exists (its
+# prefix is root-owned, so `port install` runs under sudo), else Homebrew at
+# /usr/local; SECURENET_PKG=macports|homebrew overrides (same rule as the
+# suite's lib/pkg.sh, which this standalone script cannot source).
 PM=none
-detect_pm() { have brew && PM=brew || PM=none; }
+PM_NAME=Homebrew
+detect_pm() {
+    PM=none; PM_NAME=Homebrew
+    if [[ "$(/usr/bin/uname -m)" == arm64 ]]; then
+        have brew && PM=brew || PM=none
+        return 0
+    fi
+    case "${SECURENET_PKG:-}" in
+        macports) [[ -x /opt/local/bin/port ]] && PM=port ;;
+        homebrew) have brew && PM=brew ;;
+        *)  if [[ -x /opt/local/bin/port ]]; then PM=port
+            elif have brew; then PM=brew
+            fi ;;
+    esac
+    [[ "$PM" == port ]] && PM_NAME=MacPorts
+    return 0
+}
+
+# Install packages with the active manager. brew: as the user, never root.
+# port: prebuilt archive first (-b), source build only if there is none, one
+# port per command so a single failure does not abort the rest.
+pm_install() {
+    local p rc=0
+    case "$PM" in
+        brew) brew install "$@" ;;
+        port)
+            ensure_sudo || { echo "sudo unavailable — cannot run port install" >&2; return 1; }
+            for p in "$@"; do
+                sudo -n /opt/local/bin/port -N -b install "$p" >/dev/null 2>&1 \
+                    || sudo -n /opt/local/bin/port -N install "$p" || rc=1
+            done
+            return $rc ;;
+        *) return 1 ;;
+    esac
+}
+
+# Absolute path of a manager-installed command (prefix bin first, then PATH).
+pm_bin() {
+    local pre="$BREW_PREFIX"
+    [[ "$PM" == port ]] && pre=/opt/local
+    if [[ -x "$pre/bin/$1" ]]; then echo "$pre/bin/$1"; else command -v "$1" 2>/dev/null; fi
+}
 
 # command → Homebrew formula. Empty value = provided by the base system (whois,
 # dig, tcpdump, traceroute, curl), covered by a runtime fallback (geoiplookup →
@@ -209,10 +275,28 @@ declare -A DEP_PKG=(
     [gawk]="gawk"
 )
 
-# Echo the Homebrew formula backing a command (empty if none / base-system).
+# command → MacPorts port, only where it differs from the Homebrew formula.
+# nbtscan has a port (no brew formula); onesixtyone/hping3/geoiplookup stay
+# skipped (no onesixtyone port; hping3 is unmaintained — same as on Homebrew).
+declare -A DEP_PORT=(
+    [tshark]="wireshark4"
+    [smbclient]="samba4"
+    [gsed]="gsed"
+    [nbtscan]="nbtscan"
+)
+
+# Homebrew formula names for the GNU userland → MacPorts port names.
+port_name() { case "$1" in gnu-sed) echo gsed ;; wireshark) echo wireshark4 ;; samba) echo samba4 ;; *) echo "$1" ;; esac; }
+
+# Echo the package backing a command for the active manager (empty if none /
+# base-system).
 dep_pkg_for() {
     local cmd="$1"
-    echo "${DEP_PKG[$cmd]:-}"
+    if [[ "$PM" == port && -n "${DEP_PORT[$cmd]+x}" ]]; then
+        echo "${DEP_PORT[$cmd]}"
+    else
+        echo "${DEP_PKG[$cmd]:-}"
+    fi
 }
 
 # Human-readable install hint for a list of commands (for skip messages).
@@ -222,7 +306,11 @@ dep_hint() {
         p=$(dep_pkg_for "$c")
         [[ -n "$p" ]] && out+=("$p") || out+=("$c")
     done
-    echo "brew install ${out[*]}"
+    if [[ "$PM" == port ]]; then
+        echo "sudo port install ${out[*]}"
+    else
+        echo "brew install ${out[*]}"
+    fi
 }
 
 # Make sure we hold a usable sudo credential before a privileged step.
@@ -240,26 +328,32 @@ gnu_grep_ok() { grep --version 2>/dev/null | grep -qi 'gnu grep'; }
 gnu_sed_ok()  { sed  --version 2>/dev/null | grep -qi 'gnu sed'; }
 
 # Ensure the GNU userland the script's text-processing depends on. Installs any
-# missing backing formula via Homebrew; the gnubin dirs are already first on
-# PATH, so freshly-installed tools resolve immediately. Best-effort and silent-ish.
+# missing backing formula via Homebrew (or port via MacPorts); the gnubin dirs
+# are already first on PATH, so freshly-installed tools resolve immediately.
+# Best-effort and silent-ish.
 ensure_gnu_userland() {
-    [[ "$PM" == brew ]] || return 0
-    local want=()
+    [[ "$PM" == brew || "$PM" == port ]] || return 0
+    local want=() w
     gnu_grep_ok            || want+=(grep)
     gnu_sed_ok             || want+=(gnu-sed)
     have gstat             || want+=(coreutils)
     have gawk              || want+=(gawk)
     (( ${#want[@]} == 0 )) && return 0
-    ui --infobox "Installing GNU userland (${want[*]}) via Homebrew…\nNeeded for probesource's log parsing." 6 66 2>/dev/null || \
+    if [[ "$PM" == port ]]; then
+        for w in "${!want[@]}"; do want[w]=$(port_name "${want[w]}"); done
+        ensure_sudo || return 0
+    fi
+    ui --infobox "Installing GNU userland (${want[*]}) via ${PM_NAME}…\nNeeded for probesource's log parsing." 6 66 2>/dev/null || \
         echo "Installing GNU userland: ${want[*]}" >&2
-    brew install "${want[@]}" >"$LOG_DIR/gnu-install.log" 2>&1 || true
+    pm_install "${want[@]}" >"$LOG_DIR/gnu-install.log" 2>&1 || true
 }
 
-# Best-effort install of the formulae backing the given missing commands.
-# brew runs as the normal user (never root). enum4linux-ng → pipx from upstream
-# git (not on PyPI / Homebrew).
+# Best-effort install of the packages backing the given missing commands.
+# brew runs as the normal user (never root); port runs under sudo.
+# enum4linux-ng → pipx (the active manager's) from upstream git (not on PyPI /
+# Homebrew / MacPorts).
 install_for_cmds() {
-    local c pkg fmla=() want_e4l=0
+    local c pkg fmla=() want_e4l=0 px
     for c in "$@"; do
         if [[ "$c" == enum4linux-ng ]]; then want_e4l=1; continue; fi
         pkg=$(dep_pkg_for "$c"); [[ -z "$pkg" ]] && continue
@@ -269,13 +363,14 @@ install_for_cmds() {
         # dedupe (nmap backs both nmap and nping, etc.)
         local -a uniq=()
         mapfile -t uniq < <(printf '%s\n' "${fmla[@]}" | awk '!seen[$0]++')
-        brew install "${uniq[@]}"
+        pm_install "${uniq[@]}"
     fi
     if (( want_e4l )); then
-        have pipx || brew install pipx
-        if have pipx; then
-            pipx install "git+https://github.com/cddmp/enum4linux-ng.git" >/dev/null 2>&1
-            pipx ensurepath >/dev/null 2>&1 || true
+        px=$(pm_bin pipx)
+        [[ -n "$px" ]] || { pm_install pipx; px=$(pm_bin pipx); }
+        if [[ -n "$px" ]]; then
+            "$px" install "git+https://github.com/cddmp/enum4linux-ng.git" >/dev/null 2>&1
+            "$px" ensurepath >/dev/null 2>&1 || true
         fi
     fi
     return 0
@@ -309,14 +404,20 @@ check_and_install_deps() {
     detect_pm
     local -a miss; mapfile -t miss < <(missing_cmds)
     if (( ${#miss[@]} == 0 )); then
-        info "All probe tools are installed.\nPackage manager: Homebrew."
+        info "All probe tools are installed.\nPackage manager: ${PM_NAME}."
         return 0
     fi
     if [[ "$PM" == none ]]; then
-        info "Missing tools:\n  ${miss[*]}\n\nHomebrew not found — install it from https://brew.sh then re-run."
+        if [[ "$(/usr/bin/uname -m)" == arm64 ]]; then
+            info "Missing tools:\n  ${miss[*]}\n\nHomebrew not found — install it from https://brew.sh then re-run."
+        else
+            info "Missing tools:\n  ${miss[*]}\n\nNo package manager found — install MacPorts (https://www.macports.org) or Homebrew, then re-run."
+        fi
         return 0
     fi
-    # Split into brew-installable vs no-formula (manual/skip).
+    local none_lbl="No Homebrew formula" unit="formula(e)" verb="brew installing"
+    [[ "$PM" == port ]] && { none_lbl="No MacPorts port"; unit="port(s)"; verb="port installing"; }
+    # Split into installable vs no-package (manual/skip).
     local -a inst=() manual=()
     local c
     for c in "${miss[@]}"; do
@@ -327,20 +428,25 @@ check_and_install_deps() {
         fi
     done
     local msg="Missing ${#miss[@]} probe tool(s):\n\n  ${miss[*]}\n"
-    (( ${#manual[@]} )) && msg+="\nNo Homebrew formula (skip / build yourself):\n  ${manual[*]}\n"
+    (( ${#manual[@]} )) && msg+="\n${none_lbl} (skip / build yourself):\n  ${manual[*]}\n"
     if (( ${#inst[@]} == 0 )); then
         info "$msg"
         return 0
     fi
     local hint; hint=$(dep_hint "${inst[@]}")
-    ui --yesno "${msg}\nInstall the ${#inst[@]} available via Homebrew?\n( ${hint} )" 18 78 || return 0
-    ui --infobox "brew installing ${#inst[@]} formula(e)…\nThis can take a few minutes." 6 60
+    ui --yesno "${msg}\nInstall the ${#inst[@]} available via ${PM_NAME}?\n( ${hint} )" 18 78 || return 0
+    if [[ "$PM" == port ]]; then ensure_sudo || return 0; fi
+    ui --infobox "${verb} ${#inst[@]} ${unit}…\nThis can take a few minutes." 6 60
     install_for_cmds "${inst[@]}" >"$LOG_DIR/dep-install.log" 2>&1 || true
     local -a still; mapfile -t still < <(missing_cmds)
     if (( ${#still[@]} == 0 )); then
         info "All dependencies installed."
     else
-        info "Installed what Homebrew had. Still missing:\n  ${still[*]}\n\n(nbtscan / onesixtyone / hping3 have no brew formula.)\nLog: $LOG_DIR/dep-install.log"
+        if [[ "$PM" == port ]]; then
+            info "Installed what MacPorts had. Still missing:\n  ${still[*]}\n\n(onesixtyone / hping3 are not installed from MacPorts.)\nLog: $LOG_DIR/dep-install.log"
+        else
+            info "Installed what Homebrew had. Still missing:\n  ${still[*]}\n\n(nbtscan / onesixtyone / hping3 have no brew formula.)\nLog: $LOG_DIR/dep-install.log"
+        fi
     fi
 }
 
@@ -566,8 +672,9 @@ t_netwatch() {
 }
 # Resolve a MAC to a vendor name, cascading across every OUI source we know.
 # Order: fresh downloaded cache → IEEE oui.txt (absent on macOS) → arp-scan db →
-# nmap db. The arp-scan/nmap databases ship with their Homebrew formulae, so the
-# cache + those fallbacks are what make this work on macOS.
+# nmap db. The arp-scan/nmap databases ship with their Homebrew formulae (or
+# MacPorts ports), so the cache + those fallbacks are what make this work on
+# macOS.
 oui_vendor() {
     local raw="$1" mac prefix vendor=""
     mac=$(normalize_mac "$raw")
@@ -816,7 +923,8 @@ t_sslscan() {
     "
 }
 t_smb() {
-    # macOS ships smbutil; smbclient comes from the Homebrew samba formula.
+    # macOS ships smbutil; smbclient comes from the Homebrew samba formula
+    # (MacPorts: samba4).
     log_section "SMB / NetBIOS" bash -c "
         if command -v nbtscan >/dev/null; then
             nbtscan -v '$1' 2>&1 | head -20

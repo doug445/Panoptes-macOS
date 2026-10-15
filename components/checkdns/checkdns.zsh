@@ -25,6 +25,8 @@ checkdns() {
     _warn() { printf "  ${Y}[ WARN ]${N}  %s\n" "$*"; }
     _info() { printf "  ${C}[ INFO ]${N}  %s\n" "$*"; }
     _unkn() { printf "  ${D}[  ?   ]${N}  %s\n" "$*"; }
+    # run with a wall-clock limit (macOS has no timeout(1)); output so far is kept
+    _tmo()  { local s=$1; shift; perl -e 'alarm shift; exec @ARGV' "$s" "$@"; }
 
     printf "\n${C}╔══════════════════════════════════════════════════════╗${N}\n"
     printf   "${C}║  DNS / PRIVACY STATUS  ·  %-27s║${N}\n" "$(date '+%a %d %b %Y  %H:%M:%S')"
@@ -107,10 +109,10 @@ checkdns() {
             _ok  "Upstream resolver blocks broken DNSSEC (dnssec-failed.org → SERVFAIL)"
         else
             _warn "Upstream resolver does NOT validate DNSSEC (AD absent, failed.org resolves)"
-            _info "Consider: 1.1.1.1, 8.8.8.8, or a local validator (unbound)"
+            _info "Consider: 1.1.1.2 (Cloudflare, malware-blocking), 9.9.9.9 (Quad9), or a local validator"
         fi
     else
-        _unkn "dig not found — brew install bind"
+        _unkn "dig not found (macOS ships /usr/bin/dig; or install bind / bind9)"
     fi
     pgrep -q unbound        2>/dev/null && _ok  "unbound running (local DNSSEC validator)"
     pgrep -q dnscrypt-proxy 2>/dev/null && _ok  "dnscrypt-proxy running (supports DNSSEC)"
@@ -162,54 +164,49 @@ checkdns() {
     # ── 6. ECH — Encrypted Client Hello ──────────────────────────────────────
     # ECH encrypts the TLS ClientHello SNI field so observers can't see which
     # hostname is being connected to even when the IP is known.
-    # Requires: macOS 13+ (libnetwork TLS stack) + resolver that passes TYPE65/HTTPS records.
+    # ECH is done by each client (Firefox, Chromium browsers, an ECH-capable curl), not by
+    # macOS: Safari/WebKit has no implementation. Every client needs the site's ECH key from
+    # its DNS HTTPS record, fetched over encrypted DNS — so the resolver must pass TYPE65.
     _hdr "ECH — Encrypted Client Hello  (TLS SNI privacy)"
-    local macos_ver macos_maj
-    macos_ver=$(sw_vers -productVersion 2>/dev/null)
-    macos_maj="${macos_ver%%.*}"
-    if (( macos_maj >= 13 )); then
-        _ok  "macOS ${macos_ver} — ECH supported by libnetwork TLS stack"
-    else
-        _warn "macOS ${macos_ver} — ECH requires macOS 13 (Ventura) or later"
-    fi
+    _info "ECH is per client (Firefox, Chrome/Brave/Edge/Vivaldi/Opera, ECH curl) — Safari cannot"
     if command -v dig &>/dev/null; then
         # Use TYPE65 (numeric) — dig 9.10.x does not recognise the "HTTPS" type name
         # and silently falls back to an A query, producing false results.
         local ech_rec
-        ech_rec=$(dig +short +time=4 +tries=1 TYPE65 cloudflare.com 2>/dev/null)
+        # crypto.cloudflare.com publishes an ECH key; cloudflare.com itself does not.
+        ech_rec=$(dig +short +time=4 +tries=1 TYPE65 crypto.cloudflare.com 2>/dev/null)
         if echo "$ech_rec" | grep -qi "ech="; then
-            _ok  "HTTPS/SVCB record for cloudflare.com contains ECH key (text)"
+            _ok  "Resolver passes HTTPS records with ECH keys (crypto.cloudflare.com)"
         elif [[ -n "$ech_rec" ]]; then
-            # dig 9.10.x returns raw hex (\# NN HEXDATA); non-empty = record present + SVCB passes
-            _ok  "Resolver passes HTTPS/SVCB (TYPE65) records  (ECH data present, encoded)"
+            # dig 9.10.x prints raw hex (\# NN HEXDATA): record present, key not decodable here
+            _ok  "Resolver passes HTTPS/SVCB (TYPE65) records  (encoded — old dig)"
         else
-            _warn "No HTTPS/SVCB record for cloudflare.com — resolver may be stripping TYPE65"
+            _warn "No HTTPS/SVCB record for crypto.cloudflare.com — resolver may be stripping TYPE65"
         fi
     else
-        _unkn "dig not found — brew install bind"
+        _unkn "dig not found (macOS ships /usr/bin/dig; or install bind / bind9)"
     fi
-    if command -v curl &>/dev/null; then
-        # Probe whether libcurl actually supports ECH at runtime (not just whether the
-        # flag appears in --help, which can be present even in non-ECH builds).
-        local ech_probe_err
-        ech_probe_err=$(curl --ech grease --max-time 1 -s -o /dev/null \
-                        https://cloudflare.com 2>&1 | grep -iE "does not support|is unknown|unknown option" || true)
-        if [[ -n "$ech_probe_err" ]]; then
-            _info "Installed curl cannot do ECH (no --ech, or the flag is not compiled in)"
-            _info "Requires curl built against an ECH-patched OpenSSL (not yet in stock Homebrew)"
-        else
-            local ech_result
-            ech_result=$(curl -s -o /dev/null -w "%{http_code}" \
-                         --ech hard --max-time 5 https://cloudflare.com 2>/dev/null || true)
-            if [[ "$ech_result" == "200" || "$ech_result" == "301" || "$ech_result" == "302" ]]; then
-                _ok  "curl ECH hard mode succeeded against cloudflare.com (HTTP ${ech_result})"
-            else
-                _warn "curl ECH hard mode failed or timed out (HTTP ${ech_result:-no response})"
-                _info "Try: curl --ech grease https://cloudflare.com"
-            fi
-        fi
+    # A real handshake needs a curl built with ECH. curl only gets ECH keys over DoH
+    # (the macOS resolver does not return HTTPS records to it), so --doh-url is mandatory;
+    # tls-ech.dev reports in the page whether ECH was actually used.
+    local ech_curl="" c doh
+    for c in curl "$HOME/.local/opt/curl-ech/bin/curl" /usr/local/opt/curl-ech/bin/curl; do
+        command -v "$c" &>/dev/null || continue
+        "$c" -V 2>/dev/null | grep -q '^Features:.* ECH' && { ech_curl=$(command -v "$c"); break; }
+    done
+    doh=$( [[ -f ~/.config/macos-securenetwork-suite/dns.conf ]] && . ~/.config/macos-securenetwork-suite/dns.conf 2>/dev/null
+           print -r -- "${DOH_URL:-https://dns.adguard-dns.com/dns-query}" )
+    if [[ -z "$ech_curl" ]]; then
+        _info "No ECH-capable curl found (stock curl has no ECH; needs one built against an ECH OpenSSL)"
     else
-        _unkn "curl not found"
+        local ech_page
+        ech_page=$("$ech_curl" -s --max-time 8 --doh-url "$doh" --ech hard https://tls-ech.dev/ 2>&1 || true)
+        if [[ "$ech_page" == *"You are using ECH"* ]]; then
+            _ok  "curl ECH handshake succeeded (tls-ech.dev, keys via DoH)"
+        else
+            _warn "curl ECH handshake failed against tls-ech.dev"
+            _info "Try: $ech_curl -v --doh-url $doh --ech hard https://tls-ech.dev/"
+        fi
     fi
 
     # ── 7. VPN ────────────────────────────────────────────────────────────────
@@ -249,7 +246,7 @@ checkdns() {
         _info "No VPN connections configured in Network Preferences"
     fi
     local def_iface
-    def_iface=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')
+    def_iface=$(/sbin/route -n get default 2>/dev/null | awk '/interface:/{print $2}')
     if [[ "$def_iface" =~ ^(utun|ppp|tun|tap|ipsec) ]]; then
         _ok  "Default route via VPN interface ${def_iface} (full-tunnel — all traffic in VPN)"
     elif [[ -n "$def_iface" ]]; then

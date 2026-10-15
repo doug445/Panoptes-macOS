@@ -32,7 +32,7 @@
   until it does; rebuild waits for `Connected` *and* a raw-IP check, and rolls
   back to a clean disconnected state otherwise.
 - **Never act on a blind view.** On macOS 27 a process forked from a
-  non-Apple-signed binary (xbar, Homebrew bash, iTerm) sees an empty ARP table
+  non-Apple-signed binary (xbar, Homebrew or MacPorts bash, iTerm) sees an empty ARP table
   and socket list. Tools read through `arp_table()` (direct read, then a
   freshness-checked cache); `warp-killswitch` re-dispatches itself through
   launchd when its caller is tainted.

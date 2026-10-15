@@ -3,7 +3,7 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
-## [2.2.2] — 2026-10-15
+## [3.0.1] — 2026-10-15
 
 ### Fixed
 
@@ -21,6 +21,99 @@ This project follows [Semantic Versioning](https://semver.org/).
   sitting `(incomplete)` produced `gateway MAC aa:bb -> none` and `none -> aa:bb`
   alerts on consecutive polls. An unknown MAC on the same network now keeps the
   baseline; a MAC first learned after baseline is logged, not alerted.
+
+## [3.0.0] — 2026-10-13
+
+Intel and OpenCore Legacy Patcher support. Apple Silicon behaviour is unchanged:
+it still installs through Homebrew, with the same tools, apps and paths.
+
+### Breaking
+
+- **Intel Macs default to MacPorts.** Homebrew stopped building x86_64 bottles
+  in September 2026, so on Intel every formula compiled from source. A new
+  package layer (`lib/pkg.sh`) installs MacPorts from its signed release when
+  neither manager is present, prefers MacPorts when both are, and still uses an
+  existing Homebrew when MacPorts is absent. `SECURENET_PKG=macports|homebrew`
+  forces the choice on Intel; it is ignored on Apple Silicon.
+- **The kill-switch helper moves out of a user-writable `/usr/local/bin`.** The
+  helper runs as root through a NOPASSWD rule and four LaunchDaemons, and a
+  user who can write its directory can replace it. When Homebrew on Intel keeps
+  `/usr/local/bin` user-writable, the helper now installs to
+  `/Library/PrivilegedHelperTools/warp-killswitch` (sudoers, daemons and menu
+  follow; `/usr/local/bin` gets a link). When nothing needs `/usr/local/bin`
+  writable, it is returned to `root:wheel`. Apple Silicon is unaffected:
+  `/usr/local/bin` is already root-owned there.
+
+### Added
+
+- **OpenCore Legacy Patcher and macOS 11–13 support (degraded mode).** DNS, the
+  DoH profiles, Firefox/Chromium ECH, the firewall, netwatch, netcheck, nettop,
+  probesource, checkdns and the menu work on Intel Macs from macOS 11. Current
+  Cloudflare WARP and ProtonVPN releases need macOS 14: WARP is skipped with an
+  explanation below that, and ProtonVPN installs the newest release whose
+  minimum macOS the Mac meets, if any.
+- **`netcheck` PLATFORM INTEGRITY section**: whether this macOS still gets
+  Apple security updates, OCLP detection and version, SIP, the sealed system
+  volume, AMFI boot-args, T2 Secure Boot level, Gatekeeper and FileVault — the
+  protections OCLP trades away, stated plainly.
+- **Apps without Homebrew**: Cloudflare WARP, xbar and ProtonVPN download from
+  their vendors and install only when the signature matches the vendor Team ID.
+- **arp-scan NOPASSWD rule on MacPorts**, pinned to the exact invocations
+  netcheck and nettop use, added only when the binary and its whole directory
+  chain are root-owned. Homebrew machines keep prompting, as before.
+- **Transparent layout changes for updaters.** The installer records the layout
+  it installed (CPU, package manager, prefix). When it changes — typically an
+  Intel Mac's home folder migrated to Apple Silicon — `git pull && ./install.sh`
+  says so, re-runs every layout-dependent component (sudoers, kill-switch and
+  menu, netwatch, netcheck, probesource) even under `--only`, and ends with an
+  audit that fails if any installed file still names the old layout's paths
+  (e.g. a `/opt/local/bin/bash` shebang, the pinned MacPorts `arp-scan` rule, or
+  the Intel-era helper in `/Library/PrivilegedHelperTools`).
+- README: a prominent notice that **Homebrew dropped Intel Macs in September
+  2026** and why the suite moved Intel to MacPorts; a *Migrating an Intel Mac
+  off Homebrew* guide; the *Intel and OpenCore Legacy Patcher Macs* section,
+  with a plain caution that OCLP trades away protections the suite cannot
+  restore (also shown by `netcheck` on OCLP Macs); OCLP entries in
+  TROUBLESHOOTING; an *Updating* section.
+
+### Changed
+
+- **Second DNS fallback is now `1.1.1.2`** (Cloudflare's malware-blocking
+  resolver, still DNSSEC-validating) on every platform, in the installer and
+  the menu. `FALLBACK2=1.1.1.1` in `dns.conf` restores the unfiltered one.
+
+### Fixed
+
+- **checkdns mDNS and DNS-SD checks always reported "inconclusive"**: they
+  called a `_tmo` helper that was never defined. It now exists (perl alarm;
+  macOS has no `timeout`).
+- **checkdns ECH handshake could never pass**: it ran `curl --ech hard` without
+  `--doh-url` (curl only obtains ECH keys over DoH) against `cloudflare.com`,
+  which publishes no ECH key. It now finds an ECH-capable curl, fetches keys
+  over the configured DoH resolver and reads tls-ech.dev's verdict; the DNS
+  check uses `crypto.cloudflare.com`. The unverified "macOS 13+ libnetwork
+  supports ECH" claim is replaced by the accurate per-client note.
+- **netwatch identity tracking on macOS 14.4+/15**: `ipconfig getsummary`
+  prints `<redacted>` for SSID/BSSID without verbose mode; that string was
+  taken as a real value, so every network looked the same and the
+  `networksetup` fallback never ran. It is now treated as unknown.
+- **netcheck private-MAC check** told macOS 11–14 users to enable a setting
+  that only exists from macOS 15; it now says it is unavailable there.
+- **LAN scans and `localip` assumed Wi-Fi/`en0`**: they now use the
+  default-route interface (skipping VPN `utun`s), which matters on Intel
+  iMacs and minis where `en0` is Ethernet.
+- **Menu Accessibility link** opened nothing on macOS 11–12 (Ventura pane ID);
+  approval paths in installer messages are worded per macOS version.
+- **zsh functions broken by a `route` alias**: zsh expands aliases inside
+  function bodies at definition time, and the suite's own aliases file defines
+  `alias route='netstat -rn'` — so `checkdns`' default-interface lookup and
+  `localip` ran `netstat -rn -n get default` in any shell where that alias
+  already existed. They now call `/sbin/route`.
+- **`speedtest` alias** assumed speedtest-go's `--unix`; it now detects
+  speedtest-go or speedtest-cli (MacPorts) and uses the right flags.
+- MacPorts paths added where only Homebrew's were probed: netwatch LaunchAgent
+  `PATH`, the macOS 27 netfix interpreter lists, sleepwatcher, OUI vendor
+  databases.
 
 ## [2.2.1] — 2026-10-13
 

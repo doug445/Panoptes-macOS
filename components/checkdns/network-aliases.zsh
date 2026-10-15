@@ -8,7 +8,14 @@
 # netmask calculator, and the real `ipinfo-cli` conflicts with it.)
 
 alias myip='curl -s https://ipinfo.io/json; echo'        # public IP + ASN + geolocation
-alias localip='ipconfig getifaddr en0'                   # private IP on the primary Wi-Fi/Ethernet interface
+# private LAN IP: default-route interface if it is a real one (not a VPN utun), else Wi-Fi,
+# else en0 — on 2012-2017 iMacs/minis en0 is Ethernet and Wi-Fi is en1
+function localip {
+    local i
+    i=$(/sbin/route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')
+    [[ "$i" == en* ]] || i=$(networksetup -listallhardwareports 2>/dev/null | awk '/Hardware Port: Wi-Fi/{getline; print $2; exit}')
+    ipconfig getifaddr "${i:-en0}"
+}
 alias allips='ifconfig | grep "inet " | grep -v 127.0.0.1'   # all non-loopback local IPs
 alias flushdns='sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder'
 alias checknet='echo "--- DNS CONFIG ---" && scutil --dns | grep nameserver | head -n 5 && echo "\n--- WARP STATUS ---" && warp-cli status && echo "\n--- mDNS STATUS ---" && sudo launchctl list | grep mDNSResponder && echo "\n--- ADGUARD REACHABILITY ---" && ping -c 1 94.140.14.14 &> /dev/null && echo "AdGuard DNS: REACHABLE" || echo "AdGuard DNS: UNREACHABLE"'
@@ -26,7 +33,12 @@ alias pingg='ping -c 5 8.8.8.8'                         # 5-packet ping to Googl
 alias ping1='ping -c 1'                                  # single-packet reachability check
 alias tracert='traceroute'                               # Windows-style alias for muscle memory
 # speedtest-go (binary: speedtest). Homebrew deprecated speedtest-cli (disabled 2027-01-18).
-alias speedtest='speedtest --unix'                       # upload/download speed test, one line per result
+# speed test: speedtest-go (Homebrew; binary `speedtest`) or speedtest-cli (MacPorts/pip)
+function speedtest {
+    if command speedtest --version 2>/dev/null | grep -qi 'speedtest-go'; then command speedtest --unix "$@"
+    elif command -v speedtest-cli >/dev/null; then command speedtest-cli --simple "$@"
+    else echo "install speedtest-go (Homebrew) or speedtest-cli (MacPorts)" >&2; return 1; fi
+}
 
 alias arp='arp -a'                                       # display ARP cache (all local network hosts seen)
 alias route='netstat -rn'                                # routing table (numeric, no DNS lookup)
@@ -70,7 +82,7 @@ port_range() {
 }
 
 # Watch all ESTABLISHED connections, refreshing every 2 seconds.
-# Requires GNU watch: brew install watch
+# Requires GNU watch (Homebrew: brew install watch · MacPorts: sudo port install watch)
 watch_conns() {
     watch -n2 "lsof -i -n -P | grep ESTABLISHED"
 }
