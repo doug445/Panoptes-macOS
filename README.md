@@ -307,7 +307,7 @@ by switching off protections Apple relies on, and `netcheck` lists them under
 > secure in the first place — and this suite cannot put them back. A
 > network-security suite on top of a disabled SIP and AMFI is a locked front
 > door with the back wall removed. If the Mac matters, the sensible options are
-> a Mac Apple still supports, staying on the last macOS release Apple shipped
+> a Mac that Apple still supports, staying on the last macOS release Apple shipped
 > for your model for as long as it gets updates, or Linux on the same hardware,
 > which supports it properly.
 
