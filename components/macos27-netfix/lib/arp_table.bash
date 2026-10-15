@@ -12,14 +12,20 @@
 # Requires (define near the top of the script, before first use):
 #   ARP_CACHE="${HOME}/.local/share/netwatch/arp.cache"
 #   ARP_CACHE_MAX_AGE=120
-#   arp_stale_warned=0
+#   ARP_STALE_REPEAT=3600      # long-running monitors: re-notify at most this often
+#   LOG_DIR="${HOME}/.local/share/netwatch"
+#
+# The "already warned" state is a FILE, not a shell variable: callers wrap this
+# in `$(...)` and `| awk`, and a variable set in that subshell never reaches
+# the main loop — netwatch re-notified on every poll until this was changed
+# (2026-10-15). A one-shot tool can set ARP_STALE_REPEAT=0 to always report.
 #
 # Table rows look like:
 #   ? (192.168.0.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]
 # so $2 is "(<ip>)" and $4 is the MAC.
 
 arp_table() {
-    local direct now mtime age
+    local direct now mtime age last mark="${LOG_DIR}/arp_stale_notified"
     direct=$(arp -an 2>/dev/null || true)
     if [[ -n "$direct" ]]; then
         printf '%s\n' "$direct"
@@ -35,15 +41,20 @@ arp_table() {
     mtime=$(stat -f %m "$ARP_CACHE" 2>/dev/null || echo 0)
     age=$(( now - mtime ))
     if (( age > ARP_CACHE_MAX_AGE )); then
-        if (( arp_stale_warned == 0 )); then
+        last=$(cat "$mark" 2>/dev/null || true)
+        [[ "$last" =~ ^[0-9]+$ ]] || last=0
+        if (( now - last >= ARP_STALE_REPEAT )); then
+            echo "$now" > "$mark"
             log_event "WARN arp cache stale (${age}s) — ARP checks inert; is com.netwatch.arpcache loaded?"
             notify critical "Degraded" "ARP cache is ${age}s stale — spoofing detection is not running."
-            arp_stale_warned=1
         fi
         return 0
     fi
 
-    arp_stale_warned=0
+    if [[ -e "$mark" ]]; then
+        rm -f "$mark"
+        log_event "INFO arp cache fresh again (${age}s old)"
+    fi
     cat "$ARP_CACHE" 2>/dev/null || true
 }
 

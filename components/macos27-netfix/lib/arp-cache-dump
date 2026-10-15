@@ -36,12 +36,16 @@ dump_rc=1
 TMP=$(mktemp "${CACHE}.XXXXXX") || exit 1
 trap 'rm -f "$TMP"' EXIT INT TERM
 
-if /usr/sbin/arp -an > "$TMP" 2>/dev/null && [ -s "$TMP" ]; then
+# Publish whatever arp(8) reports, INCLUDING an empty table. This runs rooted
+# at /bin/sh, so an empty result is the truth, not the macOS 27 blank — and it
+# is routine: a hotspot gateway such as 192.0.0.1 can sit "(incomplete)" or
+# absent for minutes at a time. Withholding the write (as this once did) froze
+# the cache mtime, and every consumer read an idle table as "agent dead" and
+# raised Degraded alerts (2026-10-15). Only a failed arp(8) leaves the previous
+# cache untouched; consumers still apply their staleness limit to catch that.
+if /usr/sbin/arp -an > "$TMP" 2>/dev/null; then
     mv -f "$TMP" "$CACHE" && dump_rc=0
 fi
-# Empty result: leave the previous cache in place rather than publishing an
-# empty table, which a consumer could misread as "no neighbours". Consumers are
-# expected to apply their own staleness limit — see arp_table.bash.
 rm -f "$TMP"
 trap - EXIT INT TERM
 

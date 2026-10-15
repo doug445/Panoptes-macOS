@@ -19,7 +19,7 @@ SUMMARY_INTERVAL=300
 NOTIFY_EXPIRE=15
 ARP_CACHE="${HOME}/.local/share/netwatch/arp.cache"
 ARP_CACHE_MAX_AGE=120
-arp_stale_warned=0
+ARP_STALE_REPEAT=3600   # re-notify a persistently stale cache at most this often
 
 mkdir -p "$LOG_DIR"
 
@@ -113,7 +113,7 @@ get_gateway_ip() {
 # cache published by the com.netwatch.arpcache LaunchAgent.
 # See components/macos27-netfix in macOS-SecureNetwork-Suite.
 arp_table() {
-    local direct now mtime age
+    local direct now mtime age last mark="${LOG_DIR}/arp_stale_notified"
     direct=$(arp -an 2>/dev/null || true)
     if [[ -n "$direct" ]]; then
         printf '%s\n' "$direct"
@@ -123,20 +123,30 @@ arp_table() {
     [[ -r "$ARP_CACHE" ]] || return 0
 
     # A stale cache reports the PRE-ATTACK gateway MAC and would mask the exact
-    # spoofing this monitor exists to catch. Refuse it, and say so.
+    # spoofing this monitor exists to catch. Refuse it, and say so — but once.
+    # This function runs inside `$(...)` and `| awk` subshells, so a shell
+    # variable cannot carry "already warned" back to the main loop: it did not,
+    # and the Degraded notification fired on every 10 s poll (2026-10-15). The
+    # rate limit therefore lives in a file, which survives subshells and
+    # restarts alike.
     now=$(date +%s)
     mtime=$(stat -f %m "$ARP_CACHE" 2>/dev/null || echo 0)
     age=$(( now - mtime ))
     if (( age > ARP_CACHE_MAX_AGE )); then
-        if (( arp_stale_warned == 0 )); then
+        last=$(cat "$mark" 2>/dev/null || true)
+        [[ "$last" =~ ^[0-9]+$ ]] || last=0
+        if (( now - last >= ARP_STALE_REPEAT )); then
+            echo "$now" > "$mark"
             log_event "WARN arp cache stale (${age}s) — is com.netwatch.arpcache loaded?"
             notify critical "Degraded" "ARP cache is ${age}s stale — MAC checks are not running."
-            arp_stale_warned=1
         fi
         return 0
     fi
 
-    arp_stale_warned=0
+    if [[ -e "$mark" ]]; then
+        rm -f "$mark"
+        log_event "INFO arp cache fresh again (${age}s old)"
+    fi
     cat "$ARP_CACHE" 2>/dev/null || true
 }
 
@@ -250,7 +260,8 @@ get_current_ssid() {
 # So baseline the whole identity and alert only on an L2 change *within* one
 # network.
 check_gateway_identity() {
-    local ssid gw_ip gw_ll gw_mac bssid fp stored
+    local ssid gw_ip gw_ll gw_mac bssid net fp stored
+    local old_mac="" old_ll="" old_bssid=""
     gw_ip=$(get_gateway_ip)
     [[ -z "$gw_ip" ]] && return 0
 
@@ -264,8 +275,29 @@ check_gateway_identity() {
     # Nothing to compare on: no L2 identity available at all.
     [[ -z "$gw_ll" && -z "$gw_mac" && -z "$bssid" ]] && return 0
 
-    fp="ssid=${ssid}|gw=${gw_ip}|mac=${gw_mac}|ll=${gw_ll}|bssid=${bssid}"
+    net="ssid=${ssid}|gw=${gw_ip}"
     stored=$(cat "$LOG_DIR/net_identity" 2>/dev/null || true)
+    if [[ -n "$stored" ]]; then
+        old_mac="${stored##*|mac=}"; old_mac="${old_mac%%|*}"
+        old_ll="${stored##*|ll=}";   old_ll="${old_ll%%|*}"
+        old_bssid="${stored##*|bssid=}"
+        # A baseline written before norm_mac(), or by the arp path, may be
+        # unpadded. Normalise the stored side too or the first comparison
+        # alerts on spelling.
+        old_mac=$(norm_mac "$old_mac")
+        old_bssid=$(norm_mac "$old_bssid")
+    fi
+
+    # An ARP entry that expired or sits "(incomplete)" — routine on hotspots —
+    # leaves the MAC unknown, and unknown is not evidence of anything. On the
+    # same network, carry the baseline MAC forward instead of alerting
+    # "aa:bb -> none" now and "none -> aa:bb" on the next poll (seen 2026-10-13
+    # and 2026-10-15). A different network never inherits the old MAC.
+    if [[ -z "$gw_mac" && -n "$old_mac" && "${stored%%|mac=*}" == "$net" ]]; then
+        gw_mac="$old_mac"
+    fi
+
+    fp="${net}|mac=${gw_mac}|ll=${gw_ll}|bssid=${bssid}"
 
     if [[ -z "$stored" ]]; then
         echo "$fp" > "$LOG_DIR/net_identity"
@@ -276,7 +308,7 @@ check_gateway_identity() {
     [[ "$fp" == "$stored" ]] && return 0
 
     # Different network (SSID or gateway IP moved) — re-baseline, don't alert.
-    if [[ "${fp%%|mac=*}" != "${stored%%|mac=*}" ]]; then
+    if [[ "$net" != "${stored%%|mac=*}" ]]; then
         echo "$fp" > "$LOG_DIR/net_identity"
         log_event "IDENTITY rebaselined (network changed) $fp"
         return 0
@@ -285,26 +317,24 @@ check_gateway_identity() {
     # A roam between the router's own radios (band steering, 2.4/5/6GHz) changes
     # the BSSID several times a day with nothing wrong. Observed doing exactly
     # that overnight on 2026-09-12, so BSSID is recorded but never alerts on its
-    # own — only the gateway's own layer-2 identity does.
-    local old_mac="${stored##*|mac=}"; old_mac="${old_mac%%|*}"
-    local old_ll="${stored##*|ll=}";   old_ll="${old_ll%%|*}"
-    local old_bssid="${stored##*|bssid=}"
-    # A baseline written before norm_mac(), or by the arp path, may be unpadded.
-    # Normalise the stored side too or the first comparison alerts on spelling.
-    old_mac=$(norm_mac "$old_mac")
-    old_bssid=$(norm_mac "$old_bssid")
-
+    # own — only the gateway's own layer-2 identity does. Likewise a MAC that
+    # was unknown at baseline and is known now is learned, not changed.
     local what=""
-    [[ "$gw_mac" != "$old_mac" ]] && what="gateway MAC ${old_mac:-none} -> ${gw_mac:-none}"
+    if [[ -n "$old_mac" && "$gw_mac" != "$old_mac" ]]; then
+        what="gateway MAC ${old_mac} -> ${gw_mac:-none}"
+    fi
     if [[ "$gw_ll" != "$old_ll" ]]; then
         [[ -n "$what" ]] && what="$what; "
         what="${what}gateway link-local ${old_ll:-none} -> ${gw_ll:-none}"
     fi
 
     if [[ -z "$what" ]]; then
-        # BSSID-only change: log the roam, stay quiet. If only the spelling
-        # differed, rewrite the canonical form without logging a non-event.
+        # BSSID-only change or newly learned MAC: log it, stay quiet. If only
+        # the spelling differed, rewrite the canonical form without logging a
+        # non-event.
         echo "$fp" > "$LOG_DIR/net_identity"
+        [[ -z "$old_mac" && -n "$gw_mac" ]] && \
+            log_event "IDENTITY learned gateway MAC $gw_mac on ${ssid:-$gw_ip}"
         [[ "$bssid" != "$old_bssid" ]] && \
             log_event "ROAM ap ${old_bssid:-none} -> ${bssid:-none} on ${ssid:-$gw_ip}"
         return 0

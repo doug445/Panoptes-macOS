@@ -38,7 +38,9 @@
   launchd when its caller is tainted.
 - **Stale data is worse than none.** The ARP cache is refused after 120 s and
   the refusal is reported — a stale gateway MAC would hide exactly the spoofing
-  netwatch exists to catch.
+  netwatch exists to catch. The publisher therefore writes even an empty table,
+  so "stale" can only mean "publisher stopped", and the report is rate-limited
+  through a marker file because the check runs in subshells.
 - **Fail loudly.** netwatch has an `ERR` trap that logs `FATAL exit=N at line N`,
   because a silent `set -e` death under launchd `KeepAlive` became an endless
   notification loop once.

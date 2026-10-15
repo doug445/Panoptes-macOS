@@ -182,6 +182,19 @@ Preserve that behavior in anything you port. Same reasoning applies to
 `netstat` fallbacks — report "could not look", never let it read as
 "nothing found".
 
+Two refinements, both learned the hard way (2026-10-15):
+
+- **An empty table is still a write.** The dumper publishes whatever `arp -an`
+  returns, empty included, so the cache mtime only stops moving when the
+  agent itself has stopped. It used to withhold empty results, and a hotspot
+  whose gateway never completes ARP froze the mtime for 16 minutes — an idle
+  table read as a dead agent.
+- **Rate-limit through a file, not a variable.** `arp_table()` is called
+  inside `$(...)` and `| awk`, so a "warned already" shell variable set there
+  never reaches the main loop; the Degraded notification fired on every 10 s
+  poll. The marker is `~/.local/share/netwatch/arp_stale_notified` and repeats
+  at most hourly (`ARP_STALE_REPEAT`).
+
 ---
 
 ## Unrelated macOS 27 upgrade breakage seen on the same machine

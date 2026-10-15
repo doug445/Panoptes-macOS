@@ -3,6 +3,25 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [2.2.2] — 2026-10-15
+
+### Fixed
+
+- **netwatch "Degraded" notification storm.** The ARP-cache staleness guard
+  runs inside `$(...)`/`| awk` subshells, so its "already warned" variable
+  never reached the main loop and the notification repeated on every 10 s
+  poll. The rate limit now lives in a marker file
+  (`~/.local/share/netwatch/arp_stale_notified`) and repeats at most hourly;
+  recovery is logged as `INFO arp cache fresh again`.
+- **Idle ARP table read as a dead publisher.** `arp-cache-dump` withheld empty
+  results, so on a hotspot whose gateway never completes ARP the cache mtime
+  froze and tripped the 120 s limit with the agent running fine. It now
+  publishes an empty table; only a failed `arp(8)` leaves the cache untouched.
+- **Gateway-identity false alerts on a vanished MAC.** An ARP entry expiring or
+  sitting `(incomplete)` produced `gateway MAC aa:bb -> none` and `none -> aa:bb`
+  alerts on consecutive polls. An unknown MAC on the same network now keeps the
+  baseline; a MAC first learned after baseline is logged, not alerted.
+
 ## [2.2.1] — 2026-10-13
 
 ### Fixed
