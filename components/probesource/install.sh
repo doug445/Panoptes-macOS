@@ -22,9 +22,10 @@
 #
 # Package manager (lib/pkg.sh): Apple Silicon always uses Homebrew under
 # /opt/homebrew, run as the normal user — never as root. Intel and OpenCore
-# Legacy Patcher Macs use MacPorts (/opt/local, installs via sudo) when present,
-# else Homebrew under /usr/local; SECURENET_PKG=macports|homebrew forces it.
-# The chosen manager can be bootstrapped if missing.
+# Legacy Patcher Macs use MacPorts (/opt/local, installs via sudo) exclusively —
+# any installed Homebrew is ignored (the two coexist). SECURENET_PKG=homebrew
+# forces the deprecated Homebrew-Intel path (it warns); the chosen manager can
+# be bootstrapped if missing.
 #
 # Dependencies installed (Homebrew formula / MacPorts port where different):
 #   bash>=4, grep, gnu-sed/gsed, coreutils, gawk (GNU userland the parser needs),
@@ -34,8 +35,15 @@
 # whois/dig/tcpdump/traceroute/curl are base-system and are not installed.
 # onesixtyone (both managers) and nbtscan (Homebrew) have no package and are
 # built from their upstream GitHub repos (needs git + Xcode Command Line Tools;
-# nbtscan also pulls autoconf/automake). hping3 (unmaintained, removed from
-# Homebrew) and geoiplookup (covered by a Team Cymru DNS fallback) stay skipped.
+# nbtscan also pulls autoconf/automake).
+#
+# MacPorts (Intel) only: ike-scan and hping3 are built from upstream too,
+# because their ports do not build on a current Apple clang toolchain (see
+# build_from_source() for the fixes). This is gated to MacPorts — on Homebrew
+# (Apple Silicon and the Intel /usr/local prefix) behaviour is unchanged:
+# ike-scan installs from its working formula and hping3 stays skipped.
+# hping3 (Homebrew only) and geoiplookup (covered by a Team Cymru DNS fallback)
+# are left to the tool's graceful skip.
 
 set -uo pipefail
 
@@ -49,7 +57,7 @@ DO_UNINSTALL=0
 DO_COPY=1        # copy the probesource script onto PATH
 DO_DEPS=auto     # auto: prompt when interactive; 1: force; 0: skip
 
-usage() { sed -n '2,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -71,8 +79,8 @@ INTERACTIVE=0
 
 # ── platform / architecture / package manager detection ─────────────────────
 # lib/pkg.sh picks the manager: arm64 → Homebrew, prefix /opt/homebrew (always);
-# x86_64 (T2, pre-T2 and OCLP Intel Macs) → MacPorts at /opt/local if present,
-# else Homebrew at /usr/local. A copy of this directory without the suite's lib/
+# x86_64 (T2, pre-T2 and OCLP Intel Macs) → MacPorts at /opt/local exclusively
+# (bootstrapped if absent; any Homebrew is ignored). A copy of this directory without the suite's lib/
 # can still install the script itself; dependency install then reports why not.
 ARCH="$(uname -m)"
 PKG_MGR=none
@@ -293,7 +301,8 @@ pm_install() {
 # Homebrew formula name; pkg_name maps it per manager). A command whose package
 # is "not available" is skipped.
 #   base system (do NOT install): whois dig tcpdump traceroute curl
-#   no package (skipped by the tool): hping3 geoiplookup
+#   no package: hping3 (source-built on MacPorts; skipped on Homebrew),
+#               geoiplookup (always skipped — covered by the DNS fallback)
 declare -A DEP_PKG=(
     [bash]="bash"
     [grep]="grep"
@@ -320,15 +329,25 @@ DEP_CMDS=(bash grep gsed gstat gawk dialog nmap arp-scan tshark p0f mtr \
 
 # No package. onesixtyone (and nbtscan on Homebrew) we build from their upstream
 # GitHub repos (both validated building on Apple Silicon); MacPorts packages
-# nbtscan, so there it is an ordinary dependency. hping3 is unmaintained and was
-# removed from Homebrew, and geoiplookup is covered by the tool's Team Cymru DNS
-# fallback — those two stay skipped.
+# nbtscan, so there it is an ordinary dependency. hping3 has no Homebrew formula
+# and geoiplookup is covered by the tool's Team Cymru DNS fallback — those stay
+# skipped on Homebrew.
 SRC_BUILD=(onesixtyone nbtscan)
 NO_BUILD=(hping3 geoiplookup)
 if [[ "$PKG_MGR" == macports ]]; then
     DEP_PKG[nbtscan]="nbtscan"
     DEP_CMDS+=(nbtscan)
     SRC_BUILD=(onesixtyone)
+    # Intel/MacPorts: the ike-scan and hping3 ports do not build on the current
+    # Apple clang toolchain, so build both from upstream with the fixes instead.
+    # (Homebrew is untouched: ike-scan stays a formula, hping3 stays skipped.)
+    # Drop ike-scan from the port list and move it + hping3 to the source build;
+    # hping3 leaves NO_BUILD so only geoiplookup remains a graceful skip.
+    unset 'DEP_PKG[ike-scan]'
+    _f=(); for _c in "${DEP_CMDS[@]}"; do [[ "$_c" == ike-scan ]] || _f+=("$_c"); done
+    DEP_CMDS=("${_f[@]}"); unset _f _c
+    SRC_BUILD+=(ike-scan hping3)
+    NO_BUILD=(geoiplookup)
 fi
 
 # Where built-from-source binaries land: prefer the Homebrew bin (alongside the
@@ -358,6 +377,44 @@ build_from_source() {
                && ( cd "$tmp/s" && ./autogen.sh >/dev/null 2>&1 && ./configure >/dev/null 2>&1 && make >/dev/null 2>&1 ); then
                 bin="$tmp/s/nbtscan"; [[ -x "$bin" ]] || bin="$tmp/s/src/nbtscan"
                 [[ -x "$bin" ]] && cp -f "$bin" "$dest/nbtscan" && chmod 755 "$dest/nbtscan" && rc=0
+            fi ;;
+        hping3)
+            # MacPorts-only (gated via SRC_BUILD). Homebrew removed the formula and
+            # the MacPorts port is a 2005 snapshot that no longer builds. Build
+            # antirez's upstream: --no-tcl (probesource uses only CLI flags), pcap.h
+            # from the macOS SDK and libpcap from the system — so the one fix needed
+            # is repointing the Makefile's hardcoded -L/usr/local/lib (a Homebrew
+            # ghost dir on a MacPorts box) at /opt/local. Installs hping/hping2 too.
+            if git clone --depth 1 https://github.com/antirez/hping.git "$tmp/s" >/dev/null 2>&1 \
+               && ( cd "$tmp/s" && ./configure --no-tcl >/dev/null 2>&1; \
+                    sed -i '' 's#-L/usr/local/lib#-L/opt/local/lib#g' Makefile && \
+                    make >/dev/null 2>&1 && [[ -x hping3 ]] ); then
+                cp -f "$tmp/s/hping3" "$dest/hping3" && chmod 755 "$dest/hping3" \
+                    && ln -sf hping3 "$dest/hping" && ln -sf hping3 "$dest/hping2" && rc=0
+            fi ;;
+        ike-scan)
+            # MacPorts-only (gated via SRC_BUILD). The port and an unpatched build
+            # both fail on Apple clang (C23): the bundled getopt.h's K&R
+            # `extern int getopt ();` is read as getopt(void) and clashes with the
+            # SDK declaration. Build under -std=gnu17 (appended, so it beats the
+            # -std=gnu23 configure bakes in) against MacPorts openssl3, and
+            # `make install` into ~/.local so the backoff/vendor-id data files land
+            # beside the binary (ike-scan looks for them via a compiled-in path).
+            local oss=/opt/local/libexec/openssl3 prefix
+            prefix="$(cd "$dest/.." && pwd)"
+            have autoreconf || pm_install autoconf automake libtool >/dev/null 2>&1 || true
+            [[ -d "$oss" ]] || pm_install openssl3 >/dev/null 2>&1 || true
+            if git clone --depth 1 https://github.com/royhills/ike-scan.git "$tmp/s" >/dev/null 2>&1 \
+               && ( cd "$tmp/s" && autoreconf --install >/dev/null 2>&1 && \
+                    ./configure --prefix="$prefix" --with-openssl="$oss" \
+                        CPPFLAGS="-I$oss/include" LDFLAGS="-L$oss/lib" >/dev/null 2>&1 && \
+                    make -j"$(sysctl -n hw.ncpu)" CFLAGS="-std=gnu17 -g -O2" >/dev/null 2>&1 && \
+                    make install >/dev/null 2>&1 ) && [[ -x "$prefix/bin/ike-scan" ]]; then
+                # make install places it at $prefix/bin (== $dest on MacPorts); copy
+                # across only if a --prefix elsewhere ever made them differ.
+                [[ "$prefix/bin/ike-scan" -ef "$dest/ike-scan" ]] || \
+                    { cp -f "$prefix/bin/ike-scan" "$dest/ike-scan" && chmod 755 "$dest/ike-scan"; }
+                rc=0
             fi ;;
     esac
     rm -rf "$tmp"
@@ -531,10 +588,10 @@ install_deps() {
     fi
     if [[ "$PKG_MGR" == macports ]]; then
         echo "Reminder — not installed and left to the tool's graceful skip: ${NO_BUILD[*]}"
-        echo "  (hping3 is unmaintained upstream; geoiplookup uses the DNS fallback.)"
+        echo "  (geoiplookup uses probesource's Team Cymru DNS fallback.)"
     else
         echo "Reminder — no brew formula and left to the tool's graceful skip: ${NO_BUILD[*]}"
-        echo "  (hping3 is unmaintained / removed from Homebrew; geoiplookup uses the DNS fallback.)"
+        echo "  (hping3 has no Homebrew formula; geoiplookup uses the DNS fallback.)"
     fi
 }
 

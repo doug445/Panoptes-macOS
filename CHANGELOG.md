@@ -3,6 +3,33 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [3.1.0] — 2026-10-16
+
+### Changed
+
+- **Intel is now MacPorts-exclusive.** On Intel (x86_64) the suite uses MacPorts
+  and ignores any Homebrew that is installed, rather than falling back to an
+  existing `/usr/local` Homebrew. Because MacPorts (`/opt/local`) and Homebrew
+  (`/usr/local`) coexist, the suite bootstraps MacPorts alongside your Homebrew
+  without disturbing it. Apple Silicon is unaffected — it still uses Homebrew,
+  unchanged. (`lib/pkg.sh` `pkg_detect`.)
+
+### Added
+
+- **probesource builds `ike-scan` and `hping3` from upstream on MacPorts/Intel.**
+  Both ports fail to build on the current Apple clang toolchain (C23), so
+  `components/probesource/install.sh` now builds them from source: ike-scan with
+  `-std=gnu17` against MacPorts `openssl3`; hping3 `--no-tcl` with the Makefile
+  lib path repointed to `/opt/local`. Gated to MacPorts — on Homebrew (Apple
+  Silicon and Intel) ike-scan stays a formula and hping3 stays skipped.
+
+### Deprecated
+
+- **`SECURENET_PKG=homebrew` on Intel.** Retained as an explicit escape hatch to
+  force the old Homebrew-Intel path, but it now prints a deprecation warning and
+  will be removed when Homebrew ends Intel support (~Sept 2027). Homebrew moved
+  Intel to Tier 3 in Sept 2026 (no new x86_64 bottles).
+
 ## [3.0.1] — 2026-10-15
 
 ### Fixed

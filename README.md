@@ -42,9 +42,12 @@ and the unified log instead of systemd-resolved, NetworkManager and nftables.
 > Intel Macs** — including OpenCore Legacy Patcher Macs — instead of Homebrew.
 > MacPorts still publishes **prebuilt** packages for every macOS from 10.6 to
 > 27 on Intel, installs into a root-owned prefix (`/opt/local`), and coexists
-> with Homebrew if you have both. If your Intel Mac already has Homebrew and not
-> MacPorts, the suite keeps using Homebrew, but expect long compiles; see
-> [migrating an Intel Mac off Homebrew](#migrating-an-intel-mac-off-homebrew).
+> with Homebrew if you have both. On Intel the suite uses **MacPorts
+> exclusively** and ignores any Homebrew that is installed — because the two
+> coexist, it bootstraps MacPorts alongside your Homebrew without disturbing it.
+> (`SECURENET_PKG=homebrew` still forces the old Homebrew-Intel path, but it is
+> deprecated and warns; see
+> [migrating an Intel Mac off Homebrew](#migrating-an-intel-mac-off-homebrew).)
 >
 > **Apple Silicon is unaffected and unchanged**: it keeps using Homebrew,
 > exactly as before.
@@ -245,7 +248,7 @@ installs everything that can work there and tells you plainly about the rest.
 
 | | Apple Silicon | Intel, macOS 14+ | Intel / OCLP, macOS 11–13 |
 |---|---|---|---|
-| Package manager | Homebrew | MacPorts (or an existing Homebrew) | MacPorts |
+| Package manager | Homebrew | MacPorts (exclusively) | MacPorts |
 | DNS, DoH profiles, Firefox/Chromium ECH, firewall | ✓ | ✓ | ✓ |
 | netwatch, netcheck, nettop, probesource, checkdns | ✓ | ✓ | ✓ |
 | Cloudflare WARP + kill-switch | ✓ | ✓ | — current WARP needs macOS 14 |
@@ -257,19 +260,50 @@ September 2026, so on Intel every formula compiles from source, and Homebrew
 does not support older macOS releases at all. MacPorts ships prebuilt packages
 for every macOS from 10.6 to 27, installs into a root-owned prefix, and is
 installed by the suite from its signed release (Developer ID `QTA3A3B7F3`) if
-missing. If Homebrew is already there and MacPorts is not, the suite uses it.
-Force either with `SECURENET_PKG=macports|homebrew ./install.sh` (Intel only).
+missing. The suite uses MacPorts on Intel **exclusively** and ignores any
+Homebrew that is installed; since the two coexist (`/opt/local` vs
+`/usr/local`), it bootstraps MacPorts without touching your Homebrew.
+`SECURENET_PKG=homebrew ./install.sh` still forces the old Homebrew-Intel path,
+but that override is **deprecated** (it warns) and will be removed when Homebrew
+ends Intel support (~Sept 2027). Apple Silicon is unaffected.
 
 **Apps without Homebrew.** Cloudflare WARP, xbar and ProtonVPN are downloaded
 from their vendors and installed only if the signature matches the vendor's
 Team ID (`68WVV388M8`, `N3H5B92L5N`, `J6S6Q257EK`). ProtonVPN's update feed is
 read to pick the newest release whose minimum macOS this Mac meets.
 
+### The Homebrew-on-Intel deadline — migrate regardless of this suite
+
+This is not a suite-specific policy; it is the reality for **any** tool you
+install with Homebrew on an Intel Mac:
+
+- **Sept 2026 — Tier 3 (already in effect).** Homebrew 7.0.0 demoted Intel
+  (x86_64) macOS to its lowest support tier and stopped building new bottles.
+  Every formula you install or upgrade now **compiles from source** — slow,
+  and increasingly failure-prone as formulae assume toolchains Intel no longer
+  gets tested against.
+- **~Sept 2027 — full removal.** Homebrew plans to end the ability to run on
+  Intel hardware entirely. After that, `brew` itself will not run on your Intel
+  Mac, so there is no "keep limping along" option — only an unsupported fork.
+- **The hardware is frozen.** macOS Tahoe (26) is the **last** Intel-capable
+  macOS; there will be no newer OS to move to, so the Intel population only
+  shrinks and tooling support erodes with it.
+
+**What this means for you:** plan to move your entire Homebrew-Intel toolchain
+to MacPorts **before Sept 2027**, not just this suite's dependencies. Homebrew's
+own warning on Intel now points users to MacPorts for exactly this reason.
+MacPorts keeps shipping prebuilt packages for Intel (back to macOS 10.6) and
+installs into `/opt/local`, so you can migrate incrementally while Homebrew
+still runs — the two coexist. This suite already does its part by using MacPorts
+on Intel; the steps below are the same process for the rest of your `brew`
+packages.
+
 ### Migrating an Intel Mac off Homebrew
 
-You do not have to remove Homebrew to use the suite: install MacPorts and the
-installer switches to it. To leave Homebrew entirely, as the suite's own Intel
-test machine did:
+You do not have to remove Homebrew to use the suite: on Intel it uses MacPorts
+regardless, bootstrapping it if absent, and leaves your Homebrew in place
+untouched (the two coexist). To leave Homebrew entirely, as the suite's own
+Intel test machine did:
 
 1. Install MacPorts (or run `./install.sh --only deps`, which installs the
    signed release for your macOS), then `sudo port selfupdate`.

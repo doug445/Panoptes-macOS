@@ -13,14 +13,21 @@
 #   * MacPorts (/opt/local) — root-owned prefix, prebuilt archives for every macOS from
 #     10.6 to 27. Preferred on Intel: Homebrew stopped building x86_64 bottles in
 #     September 2026, so every formula compiles there.
-#   * Homebrew (/usr/local) — still used on Intel if it is already installed and MacPorts
-#     is not (slow: everything builds from source).
-#   On Intel, SECURENET_PKG=macports|homebrew forces the choice.
+#   * Homebrew (/usr/local) — DEPRECATED on Intel and no longer auto-selected. Intel is
+#     MacPorts-exclusive: because the two coexist (/opt/local vs /usr/local), the suite
+#     uses MacPorts and ignores any Homebrew present. Homebrew-Intel is reachable only
+#     via the explicit SECURENET_PKG=homebrew override, which pkg_detect() warns about
+#     once. Rationale: Homebrew moved Intel to Tier 3 in Sept 2026 (no new x86_64
+#     bottles) and ends Intel support entirely around Sept 2027; the override is removed
+#     then, leaving a clean split (arm64 → Homebrew, Intel → MacPorts).
+#     Apple Silicon Homebrew is unaffected and is NOT deprecated.
+#   On Intel, SECURENET_PKG=macports (default) or homebrew (deprecated) forces the choice.
 #
 # Interface (all set/defined after pkg_detect):
 #   PKG_MGR        macports | homebrew
 #   PKG_PREFIX     /opt/local | /opt/homebrew | /usr/local
-#   pkg_detect                 choose the manager (no side effects)
+#   pkg_detect                 choose the manager (sets PATH; warns once on
+#                              deprecated Homebrew-Intel — otherwise no side effects)
 #   pkg_bootstrap              install the chosen manager if it is missing
 #   pkg_name GENERIC           this manager's package name for a generic name ("" = none)
 #   pkg_installed GENERIC      0 if installed
@@ -63,14 +70,15 @@ pkg_detect() {
         # Apple Silicon: unconditionally the original Homebrew path (see POLICY above).
         PKG_MGR=homebrew; PKG_PREFIX=/opt/homebrew
     else
+        # Intel is MacPorts-exclusive. MacPorts (/opt/local) and Homebrew (/usr/local)
+        # coexist, so the suite simply uses MacPorts here and IGNORES any Homebrew that
+        # is installed — Homebrew-Intel is Tier 3 / source-only and EOL ~Sept 2027, and
+        # bootstrapping MacPorts alongside an existing Homebrew disturbs nothing.
+        # SECURENET_PKG=homebrew is still honoured as an explicit, deprecated override
+        # (pkg_detect then warns once); macports or unset both select MacPorts.
         case "${SECURENET_PKG:-}" in
-            macports) PKG_MGR=macports ;;
-            homebrew) PKG_MGR=homebrew ;;
-            "")
-                if [ -x /opt/local/bin/port ]; then PKG_MGR=macports
-                elif [ -x /usr/local/bin/brew ]; then PKG_MGR=homebrew
-                else PKG_MGR=macports
-                fi ;;
+            homebrew)    PKG_MGR=homebrew ;;
+            macports|"") PKG_MGR=macports ;;
             *) red "SECURENET_PKG must be macports or homebrew"; return 1 ;;
         esac
         if [ "$PKG_MGR" = macports ]; then PKG_PREFIX=/opt/local; else PKG_PREFIX=/usr/local; fi
@@ -80,6 +88,29 @@ pkg_detect() {
     fi
     case ":$PATH:" in *":$PKG_PREFIX/bin:"*) ;; *) PATH="$PKG_PREFIX/bin:$PKG_PREFIX/sbin:$PATH" ;; esac
     export PATH PKG_MGR PKG_PREFIX
+    pkg_warn_intel_homebrew
+}
+
+# Homebrew-on-Intel is deprecated in this suite (see POLICY). Warn once when it is
+# the selected manager. Apple Silicon (arm64) Homebrew is unaffected and never
+# triggers this; neither does MacPorts. Removal is scheduled for Homebrew's own
+# Intel end-of-life (~Sept 2027) — tracked in CHANGELOG.
+pkg_warn_intel_homebrew() {
+    [ "$ARCH" = arm64 ] && return 0
+    [ "$PKG_MGR" = homebrew ] || return 0
+    [ -n "${_PKG_INTEL_BREW_WARNED:-}" ] && return 0
+    _PKG_INTEL_BREW_WARNED=1
+    ylw "  ── DEPRECATED: Homebrew on Intel (x86_64) ──────────────────"
+    ylw "  You set SECURENET_PKG=homebrew. This suite uses MacPorts on Intel"
+    ylw "  by default and treats Homebrew-Intel as deprecated: Homebrew moved"
+    ylw "  Intel to Tier 3 in Sept 2026 (no x86_64 bottles — everything builds"
+    ylw "  from source) and ends Intel support entirely around Sept 2027,"
+    ylw "  after which this override is removed."
+    ylw "  Supported path: unset SECURENET_PKG (or set it to macports). MacPorts"
+    ylw "  coexists with your Homebrew and is bootstrapped from its signed"
+    ylw "  release if absent."
+    ylw "  (Apple Silicon Homebrew is unaffected by this notice.)"
+    ylw "  ────────────────────────────────────────────────────────────"
 }
 
 # Generic name -> per-manager package name. Empty output = not available there.

@@ -22,9 +22,11 @@
 # PLATFORMS
 #   Apple Silicon is the primary platform: Homebrew, every component, unchanged.
 #   Intel Macs — including OpenCore Legacy Patcher (OCLP) Macs — are supported in a
-#   degraded mode: MacPorts (or an existing Homebrew), and on macOS older than 14 the
-#   current Cloudflare WARP and ProtonVPN releases cannot install, so the tunnel
-#   components are skipped while DNS, firewall, monitoring and the menu still work.
+#   degraded mode: MacPorts exclusively (any installed Homebrew is ignored, since the
+#   two coexist; SECURENET_PKG=homebrew forces the deprecated Homebrew-Intel path), and
+#   on macOS older than 14 the current Cloudflare WARP and ProtonVPN releases cannot
+#   install, so the tunnel components are skipped while DNS, firewall, monitoring and
+#   the menu still work.
 #   See lib/pkg.sh.
 #
 # COMPONENTS (run in this order)

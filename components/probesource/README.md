@@ -76,8 +76,10 @@ Homebrew formula and MacPorts port names differ in a few places:
 | `smbclient` | `samba` | `samba4` |
 | `nbtscan` | — (built from git) | `nbtscan` |
 | `onesixtyone` | — (built from git) | — (built from git) |
+| `ike-scan` | `ike-scan` (formula) | — (port fails; built from git) |
+| `hping3` | — (skipped; no formula) | — (port fails; built from git) |
 | `pipx` (for `enum4linux-ng`) | `pipx` | `pipx` |
-| `bash`, `dialog`, `nmap`, `arp-scan`, `p0f`, `mtr`, `masscan`, `sslscan`, `ike-scan` | same name | same name |
+| `bash`, `dialog`, `nmap`, `arp-scan`, `p0f`, `mtr`, `masscan`, `sslscan` | same name | same name |
 
 MacPorts installs GNU tools with a `g` prefix (`ggrep`, `gsed`, `gawk`,
 `gstat`, …) and links the unprefixed names into `/opt/local/libexec/gnubin`.
@@ -105,8 +107,9 @@ The macOS port maps each of those onto native equivalents:
 ### Tools with no Homebrew formula
 
 A few tools the Linux version installs from repos/AUR/source have no Homebrew
-formula. The installer **builds two of them from their upstream GitHub repos**;
-the rest are **gated and skipped cleanly** (the tactic still logs BEGIN/END so
+formula, and a couple of MacPorts ports no longer build on a current Apple clang
+toolchain. The installer **builds these from their upstream GitHub repos**; the
+rest are **gated and skipped cleanly** (the tactic still logs BEGIN/END so
 progress accounting stays correct) rather than erroring:
 
 - **onesixtyone** (SNMP) — **built from [trailofbits/onesixtyone](https://github.com/trailofbits/onesixtyone)**
@@ -116,8 +119,18 @@ progress accounting stays correct) rather than erroring:
   it is installed from the `nbtscan` port instead. Enables the
   NetBIOS name scan in the SMB tactic, which otherwise falls back to the built-in
   `smbutil view` plus `smbclient` (from the `samba` formula / `samba4` port).
-- **hping3** — no formula and **removed from Homebrew** (unmaintained upstream);
-  the stealth-sweep and elicitor-flood tactics are skipped.
+- **hping3** — **removed from Homebrew** and the MacPorts port is a 2005 snapshot
+  that no longer builds. **On MacPorts it is built from
+  [antirez/hping](https://github.com/antirez/hping)** by `install.sh` (configured
+  `--no-tcl`, since the stealth-sweep and elicitor-flood tactics use only its CLI
+  flags; `pcap.h` comes from the macOS SDK). **On Homebrew it stays skipped** (no
+  formula), so those two tactics are skipped there.
+- **ike-scan** — a normal Homebrew formula, but its **MacPorts port fails to build
+  on Apple clang** (its bundled `getopt.h` clashes with the SDK under C23). **On
+  MacPorts it is built from [royhills/ike-scan](https://github.com/royhills/ike-scan)**
+  by `install.sh` (compiled `-std=gnu17` against MacPorts `openssl3`, with its
+  backoff/vendor-id data files installed alongside). On Homebrew the formula is
+  used unchanged. Enables the IKE/IPsec-VPN tactic.
 - **geoiplookup** (`geoip-bin`) — no formula, but the **GeoIP/ASN tactic has a
   built-in Team Cymru DNS fallback**, so ASN/GeoIP lookups still work for IPv4.
 
