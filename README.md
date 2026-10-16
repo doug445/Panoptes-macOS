@@ -41,7 +41,7 @@ and the unified log instead of systemd-resolved, NetworkManager and nftables.
 > **So from 3.0.0 the suite installs [MacPorts](https://www.macports.org) on
 > Intel Macs** — including OpenCore Legacy Patcher Macs — instead of Homebrew.
 > MacPorts still publishes **prebuilt** packages for every macOS from 10.6 to
-> 27 on Intel, installs into a root-owned prefix (`/opt/local`), and coexists
+> 26 on Intel, installs into a root-owned prefix (`/opt/local`), and coexists
 > with Homebrew if you have both. On Intel the suite uses **MacPorts
 > exclusively** and ignores any Homebrew that is installed — because the two
 > coexist, it bootstraps MacPorts alongside your Homebrew without disturbing it.
