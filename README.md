@@ -273,9 +273,14 @@ test machine did:
 
 1. Install MacPorts (or run `./install.sh --only deps`, which installs the
    signed release for your macOS), then `sudo port selfupdate`.
-2. Install the MacPorts equivalent of each formula you use, prebuilt only:
-   `sudo port -b install <name>` (`-b` fails instead of compiling). Names
-   mostly match; common differences: `gnu-sed`→`gsed`, `wireshark`→`wireshark4`,
+2. Install the MacPorts equivalent of each formula you use with
+   `sudo port install <name>`. MacPorts downloads a prebuilt archive when one
+   exists and compiles only when none does. Adding `-b` (`sudo port -b install
+   <name>`) refuses to compile, which helps when you want to avoid long builds
+   during the migration. A newly released version often has no archive for a
+   few hours, though, and in that window `-b` fails with a fetch error (404). If
+   that happens, run the same command, or `sudo port upgrade outdated`, without
+   `-b`. Names mostly match; common differences: `gnu-sed`→`gsed`, `wireshark`→`wireshark4`,
    `samba`→`samba4`, `imagemagick`→`ImageMagick7`, `sevenzip`→`7zip`,
    `bind`→`bind9`, `python@3.13`→`python313`, `qt`→`qt6`. MacPorts installs GNU
    tools with a `g` prefix (`gtimeout`, `gsed`); `/opt/local/libexec/gnubin`
