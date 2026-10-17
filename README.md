@@ -329,9 +329,9 @@ Intel test machine did:
    root daemon or NOPASSWD rule running code from there is then a root
    escalation. The suite's installer does this for `/usr/local/bin` itself.
 5. Put `/opt/local/bin` ahead of `/usr/local/bin` on your `PATH`.
-6. Update your MacPorts with `sudo port -v selfupdate && sudo port -v upgrade outdated`.
-   Use -b flag to avoid compiles (may not work with new ports until compiled by
-   MacPorts).
+6. Update your ports with `sudo port -v selfupdate && sudo port -v upgrade outdated`.
+   Use `-b` flag to avoid compiles (may not work with newly updated ports until compiled
+   by MacPorts).
    
 **What an OCLP Mac gives up.** OCLP gets a new macOS onto unsupported hardware
 by switching off protections Apple relies on, and `netcheck` lists them under
