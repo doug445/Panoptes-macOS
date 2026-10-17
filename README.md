@@ -241,10 +241,10 @@ ProtonVPN connection (the app was quit, or it dropped) shows as ⏸️ with a
 
 Apple Silicon is the primary platform and is never traded down for the others:
 it always installs through Homebrew, exactly as before. Intel Macs are
-supported in a **degraded mode**, and so are Macs running a newer macOS than
-Apple supports through [OpenCore Legacy Patcher](https://dortania.github.io/OpenCore-Legacy-Patcher/)
-(OCLP). An older Mac is often the one that needs this most, so the suite
-installs everything that can work there and tells you plainly about the rest.
+supported by MacPorts, and so are Macs running a newer macOS than Apple
+supports through [OpenCore Legacy Patcher](https://dortania.github.io/OpenCore-Legacy-Patcher/)
+(OCLP), although in a **degraded mode**. An older Mac is often the one that needs this most, 
+so the suite installs everything that can work there and tells you plainly about the rest.
 
 | | Apple Silicon | Intel, macOS 14+ | Intel / OCLP, macOS 11–13 |
 |---|---|---|---|
