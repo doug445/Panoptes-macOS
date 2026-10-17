@@ -454,7 +454,7 @@ The macOS 27 workaround installs only where `detect.sh` measures the defect.
 
 The `deps` component installs whatever is missing:
 
-- **Package manager:** Homebrew on Apple Silicon (official installer, non-interactive); MacPorts on Intel (signed release for the running macOS) unless Homebrew is already installed. Either brings the Xcode Command Line Tools.
+- **Package manager:** Homebrew on Apple Silicon (official installer, non-interactive); MacPorts on Intel (signed release for the running macOS). Either brings the Xcode Command Line Tools.
 - **Tools:** `bash` (netwatch, nettop, netcheck and probesource need bash ≥ 4; the menu and the kill-switch run on the stock bash 3.2), `nmap`, `arp-scan`, `watch`, and a speed test — `speedtest-go` on Homebrew (Homebrew deprecated `speedtest-cli`), `speedtest-cli` on MacPorts (no `speedtest-go` port)
 - **Apps:** Cloudflare WARP, xbar, ProtonVPN — Homebrew casks, or vendor downloads checked against the vendor's Team ID; skipped if the app is already in `/Applications` or does not support the running macOS
 - **probesource probe toolset:** GNU userland (`grep`, `gnu-sed`, `coreutils`, `gawk`), `dialog`, `wireshark`, `p0f`, `mtr`, `masscan`, `sslscan`, `ike-scan`, `samba`, `pipx` + `enum4linux-ng`, and `onesixtyone` / `nbtscan` built from source
