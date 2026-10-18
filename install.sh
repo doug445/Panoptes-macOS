@@ -478,7 +478,11 @@ for f in "$BIN/netwatch" "$BIN/nettop" "$BIN/netcheck" "$BIN/probesource" \
     [ -n "$bad" ] && stale="$stale\n    $f: $bad"
 done
 if sudo grep -qE "$foreign" /etc/sudoers.d/securenet-netcheck 2>/dev/null; then stale="$stale\n    /etc/sudoers.d/securenet-netcheck"; fi
-if [ "$ARCH" = arm64 ] && [ -e /Library/PrivilegedHelperTools/warp-killswitch ]; then
+# The helper also lives there on Apple Silicon when a migrated Intel Homebrew still owns
+# /usr/local/bin; the kill-switch installer then links it from /usr/local/bin, so only
+# an unlinked copy is left over.
+if [ "$ARCH" = arm64 ] && [ -e /Library/PrivilegedHelperTools/warp-killswitch ] &&
+   [ "$(readlink /usr/local/bin/warp-killswitch 2>/dev/null)" != /Library/PrivilegedHelperTools/warp-killswitch ]; then
     stale="$stale\n    /Library/PrivilegedHelperTools/warp-killswitch (Intel-era helper copy)"
 fi
 if [ -n "$stale" ]; then

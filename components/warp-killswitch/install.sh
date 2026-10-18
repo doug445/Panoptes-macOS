@@ -228,7 +228,7 @@ if [ "$HELPER" = "$HELPER_DEFAULT" ] && ! root_safe_dir /usr/local/bin; then
 fi
 if [ "$HELPER" = "$HELPER_PRIV" ]; then
     /usr/bin/install -d -m 0755 -o root -g wheel /Library/PrivilegedHelperTools
-    c_ylw "  /usr/local/bin is user-writable (Homebrew on Intel) — helper installed in $HELPER_PRIV"
+    c_ylw "  /usr/local/bin is user-writable (Intel Homebrew in /usr/local) — helper installed in $HELPER_PRIV"
 fi
 /usr/bin/install -d -m 0755 "$STATE_DIR"
 $CAT > "$HELPER" <<'HELPER_EOF'
