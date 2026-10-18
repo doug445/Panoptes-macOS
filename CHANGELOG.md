@@ -3,6 +3,17 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [3.1.1] — 2026-10-18
+
+### Fixed
+
+- **Layout audit no longer fails on the live kill-switch helper on Apple
+  Silicon.** A Mac migrated from Intel can keep the old Intel Homebrew in
+  `/usr/local`, leaving `/usr/local/bin` user-writable, so the helper rightly
+  installs to `/Library/PrivilegedHelperTools` with a link in `/usr/local/bin`.
+  The audit treated that as an Intel-era leftover; it now flags the copy only
+  when `/usr/local/bin` doesn't link to it.
+
 ## [3.1.0] — 2026-10-16
 
 ### Changed
