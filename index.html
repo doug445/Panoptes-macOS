@@ -29,7 +29,7 @@
       "name": "macOS-SecureNetwork-Suite",
       "description": "Network security suite for macOS: encrypted, filtered DNS (AdGuard DoH with DNSSEC fallbacks), Encrypted Client Hello in every capable browser, a Cloudflare WARP tunnel with a verified kill-switch and self-healing watchdog, a menu-bar control for WARP, AdGuard DNS and ProtonVPN, and monitors for port scans, ARP spoofing and evil-twin access points.",
       "applicationCategory": "SecurityApplication",
-      "operatingSystem": "macOS 14 or later on Apple Silicon; macOS 11 or later on Intel (reduced)",
+      "operatingSystem": "macOS 14–27 on Apple Silicon; macOS 11–26 on Intel (reduced)",
       "softwareVersion": "3.1.1",
       "license": "https://opensource.org/licenses/MIT",
       "url": "https://doug445.github.io/macOS-SecureNetwork-Suite/",
@@ -67,7 +67,7 @@
 
 <header class="hero">
   <div class="wrap">
-    <p class="eyebrow">macOS 14–27 · Apple Silicon and Intel · MIT</p>
+    <p class="eyebrow">Apple Silicon macOS 14–27 · Intel macOS 11–26.x · MIT</p>
     <h1>Private DNS, a WARP kill-switch and intrusion alerts for your Mac</h1>
     <p class="lede">
       Encrypted, filtered DNS with Encrypted Client Hello in every browser that can do it. A
@@ -97,6 +97,20 @@
   </picture>
   <figcaption>The menu: left glyph is the tunnel, right glyph is DNS. 🛡️🔵 means WARP is up with AdGuard DNS.</figcaption>
 </figure>
+
+<h3 id="glyphs">What the menu-bar glyphs mean</h3>
+<div class="table-scroll"><table>
+  <thead><tr><th>Glyphs</th><th>Tunnel</th><th>DNS</th></tr></thead>
+  <tbody>
+    <tr><td>🛡️🔵</td><td>Cloudflare WARP connected</td><td>AdGuard</td></tr>
+    <tr><td>🛡️⚫</td><td>Cloudflare WARP connected</td><td>Fallback or DHCP</td></tr>
+    <tr><td>🟣🔵</td><td>ProtonVPN connected (WARP parked)</td><td>AdGuard</td></tr>
+    <tr><td>🟣⚫</td><td>ProtonVPN connected (WARP parked)</td><td>Fallback or DHCP</td></tr>
+    <tr><td>💀🔴</td><td>WARP torn down (Last Resort: Tear Down); the watchdog stands by</td><td>Dropped to DHCP so a captive portal can intercept</td></tr>
+    <tr><td>🔓🔵</td><td>No tunnel</td><td>AdGuard</td></tr>
+    <tr><td>🔓⚫</td><td>No tunnel</td><td>Fallback or DHCP</td></tr>
+  </tbody>
+</table></div>
 
 <h2 id="problems">Fix a specific problem</h2>
 <div class="cards">
