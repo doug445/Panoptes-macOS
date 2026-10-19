@@ -107,14 +107,22 @@ if [[ -n "$oclp" || -d "/Library/Application Support/Dortania" ]]; then
     echo -e "    ${YELLOW}↳${NC} A gentle reminder: OCLP trades away protections this suite cannot restore. For a Mac you"
     echo -e "      depend on, prefer supported hardware, your model's last supported macOS, or Linux."
 fi
-sip=$(csrutil status 2>/dev/null | head -1 || true)
+sip=$(csrutil status 2>/dev/null </dev/null | head -1 || true)
 case "$sip" in
     *"status: enabled."*) echo -e "  ${GREEN}●${NC} System Integrity Protection: enabled" ;;
     *"status: disabled"*) echo -e "  ${RED}●${NC} System Integrity Protection: DISABLED — root can modify system files and protected processes" ;;
     "")                   echo -e "  ${YELLOW}●${NC} System Integrity Protection: unknown" ;;
     *)                    echo -e "  ${YELLOW}●${NC} System Integrity Protection: custom configuration (partially disabled — typical of OCLP)" ;;
 esac
-ssv=$(csrutil authenticated-root status 2>/dev/null | head -1 || true)
+# diskutil reports the booted volume's seal directly. csrutil authenticated-root is only the
+# fallback: with a second macOS install (e.g. the Asahi Linux stub) it asks which one to check
+# and waits on the terminal, so stdin is closed and only its status line is trusted.
+ssv=$(diskutil info / 2>/dev/null | awk -F': *' '/^ *Sealed:/ {print $2; exit}' || true)
+case "$ssv" in
+    Yes)     ssv=enabled ;;
+    No|Broken*) ssv=disabled ;;
+    *)       ssv=$(csrutil authenticated-root status 2>/dev/null </dev/null | grep -m1 'Authenticated Root status' || true) ;;
+esac
 if [[ "$ssv" == *enabled* ]]; then
     echo -e "  ${GREEN}●${NC} Signed system volume: sealed"
 elif [[ -n "$ssv" ]]; then

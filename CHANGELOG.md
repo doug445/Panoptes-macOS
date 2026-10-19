@@ -3,6 +3,18 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [3.1.2] — 2026-10-19
+
+### Fixed
+
+- **netcheck hung after the SIP line on Macs with a second macOS install.**
+  With another installation on the disk, such as the Asahi Linux stub,
+  `csrutil authenticated-root status` asks which one to check and waits on
+  the terminal; netcheck hid the prompt, so it looked frozen. The sealed-volume
+  check now reads `diskutil info /`, which reports the booted volume without
+  asking. `csrutil` remains a fallback with stdin closed, and only its status
+  line counts, so the prompt text can't be read as "NOT sealed".
+
 ## [3.1.1] — 2026-10-18
 
 ### Fixed
