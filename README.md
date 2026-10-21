@@ -13,9 +13,10 @@ Cloudflare WARP tunnel with a verified kill-switch and self-healing watchdog, a
 one-icon menu-bar control panel for WARP / AdGuard DNS / ProtonVPN, and
 monitors that watch the Application Firewall for port scans, ARP spoofing and
 evil-twin access points.** One installer sets it all up, including its
-dependencies. Apple Silicon Macs on macOS 14–27 get everything; Intel Macs,
-including OpenCore Legacy Patcher Macs on macOS 11 and later, get a reduced
-but supported set ([details](#intel-and-opencore-legacy-patcher-macs)).
+dependencies. Apple Silicon Macs on macOS 14–27 get everything; Apple supported
+Intel Macs get everything using MacPorts on macOS 14-26.x; OpenCore Legacy Patcher
+Macs on macOS 11 and later, get a reduced but supported set 
+([details](#intel-and-opencore-legacy-patcher-macs)).
 
 It is the macOS counterpart of [Panoptes](https://github.com/doug445/Panoptes),
 the Linux suite — same ideas, rebuilt on `networksetup`, `scutil`, `pf`, launchd
