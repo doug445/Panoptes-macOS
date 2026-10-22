@@ -2,6 +2,7 @@
 
 [![lint](https://github.com/doug445/macOS-SecureNetwork-Suite/actions/workflows/lint.yml/badge.svg)](https://github.com/doug445/macOS-SecureNetwork-Suite/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Free and open source](https://img.shields.io/badge/Free%20and%20open%20source-brightgreen.svg)](LICENSE)
 [![Platform: Apple Silicon macOS 14–27 | Intel and OCLP macOS 11–26.x](https://img.shields.io/badge/platform-Apple%20Silicon%2014%E2%80%9327%20%7C%20Intel%20%2B%20OCLP%2011%E2%80%9326.x-lightgrey.svg)](#requirements)
 [![Shell: bash 3.2 + zsh](https://img.shields.io/badge/shell-bash%203.2%20%2B%20zsh-4EAA25.svg)](#notes-and-caveats)
 [![DNS: AdGuard DoH | Quad9 | Cloudflare](https://img.shields.io/badge/DNS-AdGuard%20DoH%20%7C%20Quad9%20%7C%20Cloudflare-blue.svg)](#dns--encrypted-filtered-leak-free)
