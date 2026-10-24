@@ -13,7 +13,8 @@ DNSSEC fallbacks), Encrypted Client Hello in every browser that can do it, a
 Cloudflare WARP tunnel with a verified kill-switch and self-healing watchdog, a
 one-icon menu-bar control panel for WARP / AdGuard DNS / ProtonVPN, and
 monitors that watch the Application Firewall for port scans, ARP spoofing and
-evil-twin access points.** One installer sets it all up, including its
+evil-twin access points plus outbound monitoring (Lulu) and Persistence detection 
+(KnockKnock + BlockBlock).** One installer sets it all up, including its
 dependencies. Apple Silicon Macs on macOS 14–27 get everything; Intel Macs get 
 everything using MacPorts on macOS 14-26.x; OpenCore Legacy Patcher Macs on 
 macOS 11 and later, get a reduced but supported set 
