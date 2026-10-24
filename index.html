@@ -27,10 +27,10 @@
       "@type": "SoftwareApplication",
       "@id": "https://doug445.github.io/macOS-SecureNetwork-Suite/#software",
       "name": "macOS-SecureNetwork-Suite",
-      "description": "Network security suite for macOS: encrypted, filtered DNS (AdGuard DoH with DNSSEC fallbacks), Encrypted Client Hello in every capable browser, a Cloudflare WARP tunnel with a verified kill-switch and self-healing watchdog, a menu-bar control for WARP, AdGuard DNS and ProtonVPN, and monitors for port scans, ARP spoofing and evil-twin access points.",
+      "description": "Network security suite for macOS: encrypted, filtered DNS (AdGuard DoH with DNSSEC fallbacks), Encrypted Client Hello in every capable browser, a Cloudflare WARP tunnel with a verified kill-switch and self-healing watchdog, a menu-bar control for WARP, AdGuard DNS and ProtonVPN, monitors for port scans, ARP spoofing and evil-twin access points, and Objective-See's LuLu outbound firewall with BlockBlock and KnockKnock for persistence.",
       "applicationCategory": "SecurityApplication",
       "operatingSystem": "macOS 14–27 on Apple Silicon; macOS 11–26 on Intel (reduced)",
-      "softwareVersion": "3.1.2",
+      "softwareVersion": "4.0.0",
       "license": "https://opensource.org/licenses/MIT",
       "url": "https://doug445.github.io/macOS-SecureNetwork-Suite/",
       "downloadUrl": "https://github.com/doug445/macOS-SecureNetwork-Suite",
@@ -81,8 +81,8 @@
       <a class="btn" href="#problems">Fix a specific problem</a>
     </div>
     <ul class="facts" aria-label="At a glance">
-      <li>v3.1.2</li><li>Free and open source</li><li>AdGuard DoH + DNSSEC</li><li>ECH</li>
-      <li>Cloudflare WARP</li><li>ProtonVPN</li><li>xbar menu</li>
+      <li>v4.0.0</li><li>Free and open source</li><li>AdGuard DoH + DNSSEC</li><li>ECH</li>
+      <li>Cloudflare WARP</li><li>ProtonVPN</li><li>xbar menu</li><li>LuLu · BlockBlock · KnockKnock</li>
     </ul>
   </div>
 </header>
@@ -144,6 +144,7 @@
     <tr><td><strong>ECH</strong></td><td>A Chromium policy profile that stops Chrome, Brave, Edge, Vivaldi and Opera switching their own DoH off. Firefox <code>user.js</code> settings for ECH, DoH and HTTPS-only. Says plainly that Safari can't do ECH.</td></tr>
     <tr><td><strong>Tunnel</strong></td><td>Cloudflare WARP in tunnel-only mode. <code>warp-killswitch</code> tears it down verifiably, rebuilds it and heals it, and a root watchdog probes raw-IP connectivity every 10 seconds.</td></tr>
     <tr><td><strong>Menu bar</strong></td><td>One xbar icon for WARP, AdGuard DNS and ProtonVPN. Before ProtonVPN connects, WARP is parked: its daemon is stopped so it has nothing to wedge.</td></tr>
+    <tr><td><strong>Host</strong></td><td>Objective-See's free, open-source tools. LuLu blocks outbound connections you haven't approved; the Application Firewall only covers inbound. BlockBlock alerts when something installs a launch agent, daemon or login item, and KnockKnock lists everything already persistent. Homebrew casks, or the latest release checked against Objective-See's signing identity.</td></tr>
     <tr><td><strong>Monitoring</strong></td><td><code>netwatch</code> raises alerts for port scans and gateway-identity changes (ARP spoofing, evil twins), and ignores ordinary band-steering roams. <code>netcheck</code> gives a one-shot security report, including platform integrity: SIP, the sealed system volume, FileVault, Gatekeeper.</td></tr>
     <tr><td><strong>Investigation</strong></td><td><code>probesource</code> works out who knocked on your firewall. Its passive tactics send nothing to the target. Its active tactics are for hosts and networks you own or are authorised to test.</td></tr>
   </tbody>
@@ -155,7 +156,9 @@ cd macOS-SecureNetwork-Suite
 ./install.sh            # as your normal user; asks for sudo once</code></pre></div>
 <p>Then <code>checkdns</code>, <code>netcheck</code> and <code>sudo warp-killswitch status</code>.
   macOS never installs configuration profiles silently, so approve the two DoH profiles in
-  <em>System Settings › General › Device Management</em>. Everything is idempotent:
+  <em>System Settings › General › Device Management</em>, LuLu's network extension, and Full
+  Disk Access for BlockBlock; the installer says where. Leave the Objective-See tools out with
+  <code>--skip objective-see</code>. Everything is idempotent:
   <code>git pull &amp;&amp; ./install.sh</code> updates it, and <code>./uninstall.sh</code> reverses
   it.</p>
 
@@ -192,6 +195,13 @@ cd macOS-SecureNetwork-Suite
     you what they found.</p>
 </details>
 <details>
+  <summary>Does it include an outbound firewall?</summary>
+  <p>Yes, since 4.0.0: it installs LuLu, Objective-See's open-source outbound firewall, next to
+    the Application Firewall, which only blocks inbound connections. Tick "allow installed
+    applications" on LuLu's first run so WARP, ProtonVPN and xbar aren't questioned. Command-line
+    tools such as nmap and arp-scan still ask once each.</p>
+</details>
+<details>
   <summary>Does it work on Intel Macs?</summary>
   <p>Yes, in a reduced but supported mode on macOS 11 and later, including OpenCore Legacy Patcher
     Macs. It installs through MacPorts there, because Homebrew no longer builds Intel bottles.
@@ -207,8 +217,8 @@ cd macOS-SecureNetwork-Suite
       (<a href="https://github.com/doug445">doug445</a>) ·
       <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">Source on GitHub</a> ·
       <a href="https://github.com/doug445/macOS-SecureNetwork-Suite/issues">Issues</a></p>
-    <p>Independent project. Not affiliated with Apple, Cloudflare, Proton, AdGuard, Homebrew or MacPorts.</p>
-    <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 19 October 2026.</p>
+    <p>Independent project. Not affiliated with Apple, Cloudflare, Proton, AdGuard, Objective-See, Homebrew or MacPorts.</p>
+    <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 23 October 2026.</p>
   </div>
 </footer>
 
