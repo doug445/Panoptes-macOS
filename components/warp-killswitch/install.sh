@@ -100,13 +100,13 @@ audit_paths() {
         case "$pth" in
             */sleepwatcher|/usr/local/bin/warp-cli|/usr/local/bin/warp-killswitch|/Library/PrivilegedHelperTools/warp-killswitch) continue ;;  # optional / installed by us
         esac
-        [ -x "$pth" ] || { c_red "  MISSING binary referenced by $label: $pth"; bad=$((bad + 1)); }
+        [ -x "$pth" ] || { red "  MISSING binary referenced by $label: $pth"; bad=$((bad + 1)); }
     done
     if [ "$bad" -gt 0 ]; then
-        c_red "  $label references $bad path(s) that do not exist here — fix before relying on it."
+        red "  $label references $bad path(s) that do not exist here — fix before relying on it."
         return 1
     fi
-    c_grn "  path audit clean: $label"
+    grn "  path audit clean: $label"
     return 0
 }
 
@@ -172,7 +172,7 @@ done
 
 # ---- uninstall --------------------------------------------------------------
 if [ "$UNINSTALL" -eq 1 ]; then
-    c_ylw "Uninstalling warp-killswitch (rebuilding WARP first if killed)..."
+    ylw "Uninstalling warp-killswitch (rebuilding WARP first if killed)..."
     if [ -x "$HELPER" ] && [ "$("$HELPER" state 2>/dev/null)" = killed ]; then "$HELPER" up || true; fi
     for p in "$WATCHDOG_PLIST" "$SLEEP_PLIST" /Library/LaunchDaemons/local.warp-killswitch.do-*.plist; do
         [ -f "$p" ] || continue
@@ -184,19 +184,19 @@ if [ "$UNINSTALL" -eq 1 ]; then
     for tag in active source; do
         [ "$tag" = active ] && p="$PLUGIN_ACTIVE" || p="$PLUGIN_SOURCE"
         for b in "$BACKUP_DIR/security-toggle.5s.sh.$tag.pre-killswitch.bak" "$p.pre-killswitch.bak"; do
-            if [ -f "$b" ]; then as_user $CP -f "$b" "$p"; as_user /bin/chmod +x "$p"; as_user $RM -f "$p.pre-killswitch.bak"; c_grn "restored $p from $b"; break; fi
+            if [ -f "$b" ]; then as_user $CP -f "$b" "$p"; as_user /bin/chmod +x "$p"; as_user $RM -f "$p.pre-killswitch.bak"; grn "restored $p from $b"; break; fi
         done
     done
-    c_grn "Removed helper, sudoers, watchdog and sleep LaunchDaemons."
-    c_ylw "State/log left in $STATE_DIR and /var/log/warp-killswitch.log."
-    c_ylw "Reload the menu: open -g 'xbar://app/refreshAllPlugins'"
+    grn "Removed helper, sudoers, watchdog and sleep LaunchDaemons."
+    ylw "State/log left in $STATE_DIR and /var/log/warp-killswitch.log."
+    ylw "Reload the menu: open -g 'xbar://app/refreshAllPlugins'"
     exit 0
 fi
 
 # ---- preflight (warn-only, never blocks) ------------------------------------
 warn=0
-need() { command -v "$1" >/dev/null 2>&1 || { c_ylw "  missing: $1  ($2)"; warn=1; }; }
-c_ylw "Preflight:"
+need() { command -v "$1" >/dev/null 2>&1 || { ylw "  missing: $1  ($2)"; warn=1; }; }
+ylw "Preflight:"
 need warp-cli      "cloudflare-warp"
 need launchctl     "launchd"
 need pfctl         "pf firewall"
@@ -204,14 +204,14 @@ need networksetup  "macOS network config"
 need scutil        "system configuration"
 need nc            "link check"
 need curl          "captive-portal probe"
-[ -f "$WARP_PLIST" ] || { c_ylw "  missing: $WARP_PLIST (Cloudflare WARP daemon)"; warn=1; }
-if [ "$DO_MENU" -eq 1 ] && [ ! -f "$PLUGIN_ACTIVE" ]; then c_ylw "  xbar plugin not found at $PLUGIN_ACTIVE (will still install helper)"; warn=1; fi
+[ -f "$WARP_PLIST" ] || { ylw "  missing: $WARP_PLIST (Cloudflare WARP daemon)"; warn=1; }
+if [ "$DO_MENU" -eq 1 ] && [ ! -f "$PLUGIN_ACTIVE" ]; then ylw "  xbar plugin not found at $PLUGIN_ACTIVE (will still install helper)"; warn=1; fi
 if [ "$DO_MENU" -eq 1 ] && [ ! -f "$PLUGIN_SRC" ]; then die "menu plugin source not found at $PLUGIN_SRC — run this from the suite checkout, or pass --no-menu"; fi
 [ -f "$HELPER_SRC" ] || die "helper source not found at $HELPER_SRC — run this from the suite checkout"
 if [ "$DO_SLEEP" -eq 1 ] && [ -z "$SLEEPWATCHER" ]; then
-    c_ylw "  sleepwatcher not present — not needed: the watchdog detects wake natively (wall-clock gap)."
+    ylw "  sleepwatcher not present — not needed: the watchdog detects wake natively (wall-clock gap)."
 fi
-if [ "$warn" -eq 0 ]; then c_grn "  all good"; else c_ylw "  (warnings above — continuing; helper degrades gracefully)"; fi
+if [ "$warn" -eq 0 ]; then grn "  all good"; else ylw "  (warnings above — continuing; helper degrades gracefully)"; fi
 
 # ---- 1. root helper ---------------------------------------------------------
 /usr/bin/install -d -m 0755 -o root -g wheel /Library/PrivilegedHelperTools
@@ -223,11 +223,11 @@ root_only_chain /Library/PrivilegedHelperTools || die "/Library/PrivilegedHelper
 /usr/bin/install -m 0755 -o root -g wheel "$HELPER_SRC" "$HELPER"
 root_only_chain "$HELPER" || die "$HELPER did not end up root-only — refusing to write a NOPASSWD rule for it."
 audit_paths "$HELPER" "warp-killswitch helper" || true
-c_grn "installed $HELPER"
+grn "installed $HELPER"
 # CLI convenience only: sudoers and the LaunchDaemons name the real path, never this link.
 # A pre-4.1 install left the helper itself here; replace it with the link.
 if [ -d /usr/local/bin ]; then
-    [ -f "$HELPER_LINK" ] && [ ! -L "$HELPER_LINK" ] && c_ylw "  replaced the pre-4.1 helper copy at $HELPER_LINK with a link"
+    [ -f "$HELPER_LINK" ] && [ ! -L "$HELPER_LINK" ] && ylw "  replaced the pre-4.1 helper copy at $HELPER_LINK with a link"
     $RM -f "$HELPER_LINK"; /bin/ln -s "$HELPER" "$HELPER_LINK"
 fi
 
@@ -245,7 +245,7 @@ TMP_SUDO=$(/usr/bin/mktemp)
 /usr/sbin/visudo -cf "$TMP_SUDO" >/dev/null || { $RM -f "$TMP_SUDO"; die "generated sudoers is invalid."; }
 /usr/bin/install -m 0440 -o root -g wheel "$TMP_SUDO" "$SUDOERS"
 $RM -f "$TMP_SUDO"
-c_grn "installed $SUDOERS  ($TARGET_USER NOPASSWD: down | down --keep-dns | up | heal manual | status | state | verify)"
+grn "installed $SUDOERS  ($TARGET_USER NOPASSWD: down | down --keep-dns | up | heal manual | status | state | verify)"
 
 # ---- 3. watchdog LaunchDaemon -----------------------------------------------
 if [ "$DO_WATCHDOG" -eq 1 ]; then
@@ -268,13 +268,13 @@ EOF
     "$CHOWN" root:wheel "$WATCHDOG_PLIST"; /bin/chmod 0644 "$WATCHDOG_PLIST"
     /usr/bin/plutil -lint "$WATCHDOG_PLIST" >/dev/null || die "watchdog plist invalid"
     if /bin/launchctl bootstrap system "$WATCHDOG_PLIST" >/dev/null 2>&1; then
-        c_grn "installed + started local.warp-killswitch.watchdog"
+        grn "installed + started local.warp-killswitch.watchdog"
     else
-        c_red "watchdog LaunchDaemon failed to bootstrap — check: sudo launchctl print system/local.warp-killswitch.watchdog"
+        red "watchdog LaunchDaemon failed to bootstrap — check: sudo launchctl print system/local.warp-killswitch.watchdog"
     fi
 else
     /bin/launchctl bootout system "$WATCHDOG_PLIST" >/dev/null 2>&1; $RM -f "$WATCHDOG_PLIST"
-    c_ylw "watchdog skipped (--no-watchdog)"
+    ylw "watchdog skipped (--no-watchdog)"
 fi
 
 # ---- 3b. on-demand LaunchDaemons: clean re-dispatch of down/up/heal ---------
@@ -301,9 +301,9 @@ for action in down up heal; do
 EOF
     "$CHOWN" root:wheel "$DP"; /bin/chmod 0644 "$DP"
     /usr/bin/plutil -lint "$DP" >/dev/null || die "plist invalid: $DP"
-    /bin/launchctl bootstrap system "$DP" >/dev/null 2>&1 || c_ylw "  could not bootstrap $(basename "$DP")"
+    /bin/launchctl bootstrap system "$DP" >/dev/null 2>&1 || ylw "  could not bootstrap $(basename "$DP")"
 done
-c_grn "installed local.warp-killswitch.do-{down,up,heal} (launchd re-dispatch targets)"
+grn "installed local.warp-killswitch.do-{down,up,heal} (launchd re-dispatch targets)"
 
 # ---- 4. sleep/wake hook (sleepwatcher) --------------------------------------
 if [ "$DO_SLEEP" -eq 1 ] && [ -n "$SLEEPWATCHER" ]; then
@@ -328,12 +328,12 @@ if [ "$DO_SLEEP" -eq 1 ] && [ -n "$SLEEPWATCHER" ]; then
 EOF
     "$CHOWN" root:wheel "$SLEEP_PLIST"; /bin/chmod 0644 "$SLEEP_PLIST"
     /usr/bin/plutil -lint "$SLEEP_PLIST" >/dev/null || die "sleepwatcher plist invalid"
-    /bin/launchctl bootstrap system "$SLEEP_PLIST" >/dev/null 2>&1 && c_grn "installed + started local.warp-killswitch.sleepwatcher ($SLEEPWATCHER)" \
-        || c_red "sleepwatcher LaunchDaemon failed to bootstrap"
+    /bin/launchctl bootstrap system "$SLEEP_PLIST" >/dev/null 2>&1 && grn "installed + started local.warp-killswitch.sleepwatcher ($SLEEPWATCHER)" \
+        || red "sleepwatcher LaunchDaemon failed to bootstrap"
 elif [ "$DO_SLEEP" -eq 1 ]; then
-    c_ylw "sleepwatcher hook not installed (absent, and not required) — the watchdog handles wake natively."
+    ylw "sleepwatcher hook not installed (absent, and not required) — the watchdog handles wake natively."
 else
-    /bin/launchctl bootout system "$SLEEP_PLIST" >/dev/null 2>&1; $RM -f "$SLEEP_PLIST"; c_ylw "sleep hook skipped (--no-sleep-hook)"
+    /bin/launchctl bootout system "$SLEEP_PLIST" >/dev/null 2>&1; $RM -f "$SLEEP_PLIST"; ylw "sleep hook skipped (--no-sleep-hook)"
 fi
 
 # ---- 5. xbar menu plugin (both copies) --------------------------------------
@@ -349,32 +349,32 @@ write_plugin() {
     bak="$BACKUP_DIR/security-toggle.5s.sh.$tag.pre-killswitch.bak"
     if [ -f "$dest.pre-killswitch.bak" ]; then          # legacy v1 backup sitting in the plugin dir
         as_user $MV -f "$dest.pre-killswitch.bak" "$bak"; as_user /bin/chmod -x "$bak"
-        c_ylw "moved legacy backup out of the plugin folder -> $bak"
+        ylw "moved legacy backup out of the plugin folder -> $bak"
     fi
     if [ -f "$dest" ] && ! $GREP -qF "$PLUGIN_MARK" "$dest" && [ ! -f "$bak" ]; then
         as_user $CP -a "$dest" "$bak"; as_user /bin/chmod -x "$bak"
-        c_ylw "backed up $dest -> $bak"
+        ylw "backed up $dest -> $bak"
     fi
     # The plugin names the helper by its fixed /Library/PrivilegedHelperTools path.
     as_user $CP -f "$PLUGIN_SRC" "$dest" || die "could not write $dest as $TARGET_USER"
     as_user /bin/chmod 0755 "$dest"
     /bin/bash -n "$dest" || die "plugin $dest failed syntax check."
     audit_paths "$dest" "xbar plugin ($tag)" || true
-    c_grn "installed $dest"
+    grn "installed $dest"
 }
 if [ "$DO_MENU" -eq 1 ]; then
     { [ -e "$PLUGIN_ACTIVE" ] || [ -d "$(dirname "$PLUGIN_ACTIVE")" ]; } && write_plugin "$PLUGIN_ACTIVE" active
     { [ -e "$PLUGIN_SOURCE" ] || [ -d "$(dirname "$PLUGIN_SOURCE")" ]; } && write_plugin "$PLUGIN_SOURCE" source
     as_user /usr/bin/open -g 'xbar://app/refreshAllPlugins' >/dev/null 2>&1 || true
 else
-    c_ylw "menu skipped (--no-menu)"
+    ylw "menu skipped (--no-menu)"
 fi
 
 # ---- 6. self-test -----------------------------------------------------------
 echo
 "$HELPER" status
 echo
-c_grn "=== warp-killswitch v3 (macOS) installed for $TARGET_USER ==="
+grn "=== warp-killswitch v3 (macOS) installed for $TARGET_USER ==="
 echo "Menu:  WARP section -> Tear Down / Rebuild / Heal now / Status"
 echo "CLI:   sudo warp-killswitch {down|up|heal|status|verify|state}   (link in /usr/local/bin; asks for your password)"
 echo "Logs:  /var/log/warp-killswitch.log   /var/log/warp-watchdog.log"

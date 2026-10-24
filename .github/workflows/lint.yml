@@ -48,6 +48,16 @@ jobs:
           # here means new code, not legacy noise.
           shellcheck -S warning ${{ steps.files.outputs.files }}
 
+      - name: No calls to helpers that lib/common.sh no longer defines
+        run: |
+          # 4.1 moved the colour helpers into lib/common.sh as red/grn/ylw; the kill-switch
+          # installer kept calling c_red/c_grn/c_ylw until 4.2.1. shellcheck does not flag
+          # calls to undefined functions, so this does.
+          if grep -rnE '\bc_(red|grn|ylw|hdr|die)\b' ${{ steps.files.outputs.files }}; then
+            echo "call to a removed helper name — use red/grn/ylw/hdr/die from lib/common.sh"; exit 1
+          fi
+          echo "clean"
+
       - name: ShellCheck style (informational)
         continue-on-error: true
         run: shellcheck -S style ${{ steps.files.outputs.files }} || true

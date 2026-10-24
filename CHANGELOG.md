@@ -3,6 +3,20 @@
 All notable changes to Panoptes-macOS (macOS-SecureNetwork-Suite until 4.1) are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [4.2.1] — 2026-10-24 — kill-switch installer messages
+
+### Fixed
+- `components/warp-killswitch/install.sh` still called the colour helpers by
+  their pre-4.1 names (`c_red`, `c_grn`, `c_ylw`) after 4.1 moved them into
+  `lib/common.sh` as `red`, `grn`, `ylw`. The installer ran to completion and
+  installed everything correctly (the script does not `set -e`), but every
+  coloured status line it should have printed came out as
+  `c_grn: command not found`. Found on the first 4.2.0 upgrade run; the
+  installer's own `status` and `Verify` output confirmed the helper, rules and
+  watchdog were right.
+- CI now fails on any call to those removed names, so a helper rename cannot
+  slip past `shellcheck` again (it does not check for undefined functions).
+
 ## [4.2.0] — 2026-10-24 — renamed Panoptes-macOS
 
 The suite is now **Panoptes-macOS — macOS Secure Network**, the macOS
