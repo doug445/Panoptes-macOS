@@ -18,7 +18,8 @@ evil-twin access points plus outbound monitoring (Lulu) and Persistence detectio
 dependencies. Apple Silicon Macs on macOS 14–27 get everything; Intel Macs get 
 everything using MacPorts on macOS 14-26.x; OpenCore Legacy Patcher Macs on 
 macOS 11 and later, get a reduced but supported set 
-([details](#intel-and-opencore-legacy-patcher-macs)).
+([details](#intel-and-opencore-legacy-patcher-macs)). This is a a comprehensive 
+Endpoint Detection and Response (EDR) hardening framework for macOS.
 
 It is the macOS counterpart of [Panoptes](https://github.com/doug445/Panoptes),
 the Linux suite — same ideas, rebuilt on `networksetup`, `scutil`, `pf`, launchd
