@@ -14,7 +14,9 @@
 #
 # Left alone, because removing them could cut you off or is yours to decide:
 # DNS server settings, the Application Firewall, WARP itself, Homebrew and
-# everything it installed, configuration profiles (remove them in System
+# everything it installed, LuLu / KnockKnock / BlockBlock (use their own
+# uninstallers — LuLu's network extension and BlockBlock's daemon outlive a
+# dragged-out app), configuration profiles (remove them in System
 # Settings › General › Device Management on macOS 14+; Privacy & Security › Profiles on 13;
 # System Preferences › Profiles on 11–12), Firefox user.js, and all logs.
 set -u
@@ -46,4 +48,6 @@ fi
 
 echo
 echo "Done. Left in place: DNS settings, firewall, WARP, Homebrew packages,"
-echo "configuration profiles, Firefox user.js, and logs under ~/.local/share and /var/log."
+echo "LuLu/KnockKnock/BlockBlock, configuration profiles, Firefox user.js, and logs"
+echo "under ~/.local/share and /var/log. LuLu and BlockBlock run a system extension"
+echo "and a daemon: remove them with their own uninstallers (objective-see.org), not the Bin."

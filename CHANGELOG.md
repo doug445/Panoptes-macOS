@@ -3,6 +3,40 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [4.0.0] — 2026-10-23
+
+### Changed
+
+- **A plain `./install.sh` now installs more than network plumbing.** The new
+  `objective-see` component is on by default. It adds three apps, a network
+  extension (LuLu) and a root daemon (BlockBlock), and it asks you to approve
+  two macOS permissions. That changes what the suite puts on a Mac, so this is
+  a major release. `./install.sh --skip objective-see` keeps the 3.x footprint.
+
+### Added
+
+- **`objective-see` component: LuLu, KnockKnock and BlockBlock.** These are
+  Objective-See's free, open-source host tools. LuLu is an outbound firewall,
+  complementing the inbound-only Application Firewall. BlockBlock alerts on new
+  persistence, and KnockKnock scans for existing persistence on demand.
+  On Homebrew they install as casks. Otherwise (MacPorts/Intel) the latest
+  GitHub release is downloaded and used only if it is signed by Objective-See's
+  Team ID `VBG97UB4TA`, the same rule the other vendor apps follow. Already
+  installed copies are left as they are. The component runs after `deps`, so
+  LuLu's first-run *allow installed applications* covers WARP, ProtonVPN and
+  xbar. It then opens LuLu if its network extension isn't active and says where
+  to approve it, and checks that BlockBlock's daemon is running.
+  `--skip objective-see` leaves them out; `uninstall.sh` leaves them in place
+  (`lib/pkg.sh` `app_meta`, `app_path`, `app_install`).
+
+### Fixed
+
+- **`warp-killswitch status` no longer reports `sleep hook : missing` as if
+  something were broken.** The sleepwatcher hook is optional and installed only
+  if sleepwatcher already exists. Without it, the watchdog spots a wake from
+  the gap in wall-clock time and reconnects WARP. The line now reads
+  `not used — watchdog detects wake`.
+
 ## [3.1.2] — 2026-10-19
 
 ### Fixed

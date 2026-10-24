@@ -32,6 +32,8 @@
 # COMPONENTS (run in this order)
 #   deps         package manager (+ Xcode CLT), tools, apps, probesource probe tools
 #   firewall     Application Firewall on + stealth mode + logging (netwatch input)
+#   objective-see  LuLu (outbound firewall), KnockKnock (persistence scan),
+#                BlockBlock (persistence monitor) — need your approval once
 #   dns          AdGuard DNS (no-log/no-ECS) + Quad9/Cloudflare fallback
 #   sudoers      NOPASSWD rules for the menu's DNS toggle and netcheck
 #   warp         WARP registration, tunnel_only mode, MASQUE, connect
@@ -58,7 +60,7 @@ HERE="$(cd "$(dirname "$0")" && pwd -P)"
 C="$HERE/components"
 # shellcheck source=lib/pkg.sh
 . "$HERE/lib/pkg.sh"
-ALL="deps firewall dns sudoers warp killswitch netfix netwatch netcheck probesource shell profiles firefox"
+ALL="deps firewall objective-see dns sudoers warp killswitch netfix netwatch netcheck probesource shell profiles firefox"
 
 ADGUARD_DNS="94.140.14.140 94.140.14.141"
 FALLBACK1="9.9.9.9"; FALLBACK2="1.1.1.2"   # Quad9; Cloudflare malware-blocking (both validate DNSSEC)
@@ -95,6 +97,14 @@ profiles_pane() {
     if os_at_least 14.0; then echo "System Settings › General › Device Management"
     elif os_at_least 13.0; then echo "System Settings › Privacy & Security › Profiles"
     else echo "System Preferences › Profiles"; fi
+}
+
+# Where system/network extensions are allowed: Security & Privacy (11–12), Privacy &
+# Security (13–14), and Login Items & Extensions › Network Extensions (15+).
+ext_pane() {
+    if os_at_least 15.0; then echo "System Settings › General › Login Items & Extensions › Network Extensions"
+    elif os_at_least 13.0; then echo "System Settings › Privacy & Security (Allow)"
+    else echo "System Preferences › Security & Privacy (Allow)"; fi
 }
 
 # ---- args -------------------------------------------------------------------
@@ -227,6 +237,36 @@ if want firewall; then
     sudo "$ALF" --setloggingmode on  >/dev/null
     "$ALF" --getglobalstate | sed 's/^/  /'
     "$ALF" --getstealthmode | sed 's/^/  /'
+fi
+
+# ---- objective-see ------------------------------------------------------------
+# Objective-See's free, open-source host tools: LuLu blocks unknown outbound connections
+# (Application Firewall above only covers inbound), BlockBlock alerts on new persistence,
+# KnockKnock lists what is already persistent. Installed after deps so LuLu's first-run
+# "allow installed applications" covers WARP, ProtonVPN and xbar.
+if want objective-see; then
+    hdr "Objective-See: LuLu, KnockKnock, BlockBlock"
+    for app in LuLu KnockKnock BlockBlock; do
+        app_install "$app"; rc=$?
+        case $rc in 0|2) ;; *) fail "install $app" ;; esac
+    done
+    if [ -d /Applications/LuLu.app ]; then
+        if systemextensionsctl list 2>/dev/null | grep -F com.objective-see.lulu.extension | grep -q 'activated enabled'; then
+            grn "  LuLu network extension active"
+        else
+            pgrep -x LuLu >/dev/null || open -a LuLu
+            ylw "  LuLu: finish its setup window (tick \"allow installed applications\"), then allow its"
+            ylw "    extension in $(ext_pane)"
+        fi
+    fi
+    if [ -d "$(app_path BlockBlock)" ]; then
+        if launchctl print system/com.objective-see.blockblock 2>/dev/null | grep -q 'state = running'; then
+            grn "  BlockBlock daemon running"
+        else
+            ylw "  BlockBlock: give it Full Disk Access (System Settings › Privacy & Security), then re-run"
+        fi
+    fi
+    [ -d /Applications/KnockKnock.app ] && echo "  KnockKnock: run it now and after installing anything — it scans on demand, nothing runs in the background"
 fi
 
 # ---- dns --------------------------------------------------------------------
@@ -503,3 +543,4 @@ mkdir -p "$(dirname "$LAYOUT_STATE")" && printf '%s\n' "$LAYOUT" > "$LAYOUT_STAT
 grn "macOS-SecureNetwork-Suite installed ($TIER mode, $PKG_MGR)."
 [ "$TIER" = degraded ] && ylw "  Degraded mode: run netcheck — its PLATFORM INTEGRITY section shows what this Mac lacks."
 echo "  Menu bar: xbar › Security Toggle     CLI: netcheck · checkdns · nettop · probesource"
+echo "  Objective-See: LuLu (outbound alerts) · BlockBlock (persistence alerts) · KnockKnock (scan on demand)"

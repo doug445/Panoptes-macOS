@@ -795,7 +795,7 @@ status_cmd() {
     eg=$(egress_line); echo "  egress     : ${eg:-unreachable}"
     echo "  artifacts  : $(artifacts_desc)"
     echo "  watchdog   : $(/bin/launchctl print system/local.warp-killswitch.watchdog 2>/dev/null | $GREP -q 'state = running' && echo running || echo NOT running)"
-    echo "  sleep hook : $([ -f /Library/LaunchDaemons/local.warp-killswitch.sleepwatcher.plist ] && echo present || echo missing)"
+    echo "  sleep hook : $([ -f /Library/LaunchDaemons/local.warp-killswitch.sleepwatcher.plist ] && echo 'sleepwatcher (disconnects before sleep)' || echo 'not used — watchdog detects wake')"
     echo "  Wi-Fi DNS  : $(/usr/sbin/networksetup -getdnsservers Wi-Fi 2>/dev/null | /usr/bin/tr '\n' ' ')"
     tainted && echo "  note       : ARP/socket enumeration is BLANKED for this caller (macOS 27, non-Apple parent); down/up/heal auto-redispatch via launchd"
     echo "  last log   : $(/usr/bin/tail -n 1 "$LOG" 2>/dev/null)"

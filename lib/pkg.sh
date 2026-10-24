@@ -36,8 +36,10 @@
 #   pkg_bash4                  path of a bash >= 4 from the prefix ("" if absent)
 #   pkg_root_owned PATH        0 if PATH and every parent dir are root-owned and not
 #                              group/world-writable (safe target for a NOPASSWD rule)
-#   app_install APP            Cloudflare WARP | xbar | ProtonVPN — cask on Homebrew,
-#                              signature-verified vendor download otherwise
+#   app_install APP            Cloudflare WARP | xbar | ProtonVPN | LuLu | KnockKnock |
+#                              BlockBlock — cask on Homebrew, signature-verified vendor
+#                              download otherwise
+#   app_path APP               where APP lives once installed
 #
 # Callers provide grn/ylw/red/fail (install.sh does); fallbacks are defined below.
 
@@ -237,7 +239,19 @@ app_meta() {
         "Cloudflare WARP") echo "cloudflare-warp 68WVV388M8 14.0" ;;
         xbar)              echo "xbar N3H5B92L5N 10.13" ;;
         ProtonVPN)         echo "protonvpn J6S6Q257EK 14.0" ;;
+        LuLu)              echo "lulu VBG97UB4TA 10.15" ;;        # Objective-See
+        KnockKnock)        echo "knockknock VBG97UB4TA 10.15" ;;
+        BlockBlock)        echo "blockblock VBG97UB4TA 10.15" ;;
         *) return 1 ;;
+    esac
+}
+
+# BlockBlock's installer puts the app in /Library/Objective-See (only a login-item helper
+# goes in /Applications); everything else is a plain /Applications bundle.
+app_path() {
+    case "$1" in
+        BlockBlock) echo /Library/Objective-See/BlockBlock/BlockBlock.app ;;
+        *)          echo "/Applications/$1.app" ;;
     esac
 }
 
@@ -248,8 +262,9 @@ app_team_ok() {
 }
 
 app_install() {
-    local app="$1" cask team minos tmp url mnt src ver
-    [ -d "/Applications/$app.app" ] && { grn "  $app.app present"; return 0; }
+    local app="$1" cask team minos tmp url mnt src ver dest
+    dest=$(app_path "$app")
+    [ -d "$dest" ] && { grn "  $app.app present"; return 0; }
     read -r cask team minos <<EOF
 $(app_meta "$app")
 EOF
@@ -297,8 +312,39 @@ EOF
                 red "  $app in the download is missing or not signed by $team — refusing"
             fi
             /usr/bin/hdiutil detach -quiet "$mnt" ;;
+        LuLu|KnockKnock|BlockBlock)
+            if ! os_at_least "$minos"; then
+                ylw "  $app needs macOS $minos+ (this is $OS_VER) — skipped."
+                rm -rf "$tmp"; return 2
+            fi
+            # Objective-See publishes a .dmg (LuLu) or .zip (KnockKnock, BlockBlock) per release.
+            url=$(/usr/bin/curl -fsSL "https://api.github.com/repos/objective-see/$app/releases/latest" \
+                  | /usr/bin/grep -oE 'https://[^"]+\.(dmg|zip)' | head -1)
+            [ -n "$url" ] || { red "  could not find a $app download"; rm -rf "$tmp"; return 1; }
+            echo "  downloading ${url##*/}"
+            /usr/bin/curl -fsSL -o "$tmp/${url##*/}" "$url" || { rm -rf "$tmp"; return 1; }
+            mnt=""
+            case "$url" in
+                *.dmg) mnt=$(/usr/bin/hdiutil attach -nobrowse -readonly "$tmp/${url##*/}" | /usr/bin/awk -F'\t' '/\/Volumes\//{print $NF; exit}')
+                       src=$mnt ;;
+                *)     /usr/bin/ditto -x -k "$tmp/${url##*/}" "$tmp/x"; src="$tmp/x" ;;
+            esac
+            # BlockBlock ships an installer app that sets up its daemon; the others are the app.
+            if [ "$app" = BlockBlock ]; then
+                src=$(/usr/bin/find "$src" -maxdepth 2 -name "BlockBlock Installer.app" -print -quit)
+            else
+                src=$(/usr/bin/find "$src" -maxdepth 2 -name "$app.app" -print -quit)
+            fi
+            if [ -z "$src" ] || ! app_team_ok "$src" "$team"; then
+                red "  $app in the download is missing or not signed by $team — refusing"
+            elif [ "$app" = BlockBlock ]; then
+                sudo "$src/Contents/MacOS/BlockBlock Installer" -install
+            else
+                sudo /usr/bin/ditto "$src" "$dest"
+            fi
+            [ -n "$mnt" ] && /usr/bin/hdiutil detach -quiet "$mnt" ;;
     esac
     rm -rf "$tmp"
-    [ -d "/Applications/$app.app" ] && app_team_ok "/Applications/$app.app" "$team" \
-        && grn "  $app installed ($(/usr/bin/defaults read "/Applications/$app.app/Contents/Info" CFBundleShortVersionString 2>/dev/null))"
+    [ -d "$dest" ] && app_team_ok "$dest" "$team" \
+        && grn "  $app installed ($(/usr/bin/defaults read "$dest/Contents/Info" CFBundleShortVersionString 2>/dev/null))"
 }

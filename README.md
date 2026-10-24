@@ -230,6 +230,7 @@ ProtonVPN connection (the app was quit, or it dropped) shows as ⏸️ with a
 | Component | What it does |
 |---|---|
 | **`firewall`** | Application Firewall on, **stealth mode**, logging — the input everything below reads. |
+| **`objective-see`** | [Objective-See](https://objective-see.org)'s free, open-source host tools. **LuLu** blocks outbound connections you haven't approved (the Application Firewall only covers inbound). **BlockBlock** alerts when something installs persistence (a launch agent, daemon or login item). **KnockKnock** lists everything already persistent, on demand. Homebrew casks, or the latest GitHub release checked against Objective-See's Team ID. Approve them once: LuLu's network extension and BlockBlock's Full Disk Access. The installer opens LuLu and points you at the pane. In LuLu's first-run window, tick *allow installed applications* so WARP, ProtonVPN and xbar aren't questioned. |
 | **`netwatch`** | A LaunchAgent that streams the unified log for *Stealth Mode connection attempt* drops and raises native notifications: **port-scan alerts** (N probes from one source in a window, broadcast/discovery noise filtered), **gateway-identity detection** (fingerprint `ssid\|gw\|mac\|ll\|bssid`; a MAC or IPv6 link-local change on the *same* network alerts, a BSSID-only change is logged as a roam, a new SSID re-baselines), network-change notices, periodic summaries. Fails loudly: an `ERR` trap logs `FATAL exit=N at line N` so a crash loop under launchd `KeepAlive` is never silent again. |
 | **`nettop`** | Summarises the netwatch drop log by source with MAC, vendor (`arp-scan` or the ARP table) and reverse DNS. |
 | **`netcheck`** | One-shot security report: firewall state, **platform integrity** (macOS still patched by Apple, SIP, sealed system volume, AMFI, T2 Secure Boot, Gatekeeper, FileVault, OpenCore Legacy Patcher detection), listening TCP/UDP ports (localhost-only vs exposed), WARP status and an **exit check** (`warp=on` at the edge), split-tunnel exclusions, live resolvers and the Wi-Fi DNS override, encrypted-DNS profile, ARP table with the gateway marked, recent drops, top drop sources with vendor and rDNS, **MAC randomisation** state, every interface's addresses, public IPv4/IPv6. |
@@ -253,6 +254,7 @@ so the suite installs everything that can work there and tells you plainly about
 | Package manager | Homebrew | MacPorts (exclusively) | MacPorts |
 | DNS, DoH profiles, Firefox/Chromium ECH, firewall | ✓ | ✓ | ✓ |
 | netwatch, netcheck, nettop, probesource, checkdns | ✓ | ✓ | ✓ |
+| LuLu, KnockKnock, BlockBlock (`objective-see`) | ✓ | ✓ | ✓ (vendor download, signature-checked) |
 | Cloudflare WARP + kill-switch | ✓ | ✓ | — current WARP needs macOS 14 |
 | ProtonVPN | ✓ | ✓ | newest release that supports the OS, if any |
 | xbar menu | ✓ | ✓ | ✓ (AdGuard toggle; tunnel items need WARP) |
@@ -271,7 +273,9 @@ ends Intel support (~Sept 2027). Apple Silicon is unaffected.
 
 **Apps without Homebrew.** Cloudflare WARP, xbar and ProtonVPN are downloaded
 from their vendors and installed only if the signature matches the vendor's
-Team ID (`68WVV388M8`, `N3H5B92L5N`, `J6S6Q257EK`). ProtonVPN's update feed is
+Team ID (`68WVV388M8`, `N3H5B92L5N`, `J6S6Q257EK`). LuLu, KnockKnock and
+BlockBlock come from Objective-See's latest GitHub release and must be signed by
+`VBG97UB4TA`. ProtonVPN's update feed is
 read to pick the newest release whose minimum macOS this Mac meets.
 
 ### The Homebrew-on-Intel deadline — migrate regardless of this suite
@@ -411,7 +415,8 @@ notification tells you to log in.
 | Works around the macOS 27 ARP blank | **yes** | n/a | n/a | n/a |
 | Learning curve | one installer, one menu | low | low | steep |
 
-It is not a firewall and not an IDS. It is the layer between "something is
+Its own tools are not a firewall or an IDS. For outbound filtering it installs
+LuLu (the `objective-see` component). It is the layer between "something is
 wrong with my network" and "I know exactly what and why".
 
 ---
@@ -462,6 +467,7 @@ The `deps` component installs whatever is missing:
 - **Package manager:** Homebrew on Apple Silicon (official installer, non-interactive); MacPorts on Intel (signed release for the running macOS). Either brings the Xcode Command Line Tools.
 - **Tools:** `bash` (netwatch, nettop, netcheck and probesource need bash ≥ 4; the menu and the kill-switch run on the stock bash 3.2), `nmap`, `arp-scan`, `watch`, and a speed test — `speedtest-go` on Homebrew (Homebrew deprecated `speedtest-cli`), `speedtest-cli` on MacPorts (no `speedtest-go` port)
 - **Apps:** Cloudflare WARP, xbar, ProtonVPN — Homebrew casks, or vendor downloads checked against the vendor's Team ID; skipped if the app is already in `/Applications` or does not support the running macOS
+- **Objective-See apps** (installed by the `objective-see` component, not `deps`): LuLu, KnockKnock, BlockBlock, in the same way. Leave them out with `--skip objective-see`
 - **probesource probe toolset:** GNU userland (`grep`, `gnu-sed`, `coreutils`, `gawk`), `dialog`, `wireshark`, `p0f`, `mtr`, `masscan`, `sslscan`, `ike-scan`, `samba`, `pipx` + `enum4linux-ng`, and `onesixtyone` / `nbtscan` built from source
 
 Skip with `--no-deps`. **AdGuard needs no installation** — it is a public
@@ -478,6 +484,7 @@ resolver, not software. Only WARP and ProtonVPN run local daemons.
 | `~/Library/LaunchAgents/com.netwatch.plist`, `com.netwatch.arpcache.plist` | netwatch, netfix |
 | `~/.local/bin/{netwatch,nettop,netcheck,probesource,arp-cache-dump}` | netwatch, netcheck, probesource, netfix |
 | `~/.config/macos-securenetwork-suite/*.zsh` + a marked block in `~/.zshrc` | shell |
+| `/Applications/{LuLu,KnockKnock}.app`, `/Library/Objective-See/BlockBlock/` + its daemon `com.objective-see.blockblock`, LuLu's network extension | objective-see |
 | `~/.config/macos-securenetwork-suite/AdGuard-DoH.mobileconfig`, `chrome-doh-policy.mobileconfig` (rendered from the templates with your login name and DoH target) | profiles |
 | `~/.config/macos-securenetwork-suite/dns.conf` — optional per-machine overrides, read by the installer and the menu. `FALLBACK2=1.1.1.1` swaps the second fallback for Cloudflare's unfiltered resolver (the default is the malware-blocking `1.1.1.2`); `DOH_URL=https://d.adguard-dns.com/dns-query/<device-id>` plus `DOH_BOOTSTRAP=94.140.14.49` point the Chromium policy and Firefox at an AdGuard DNS account resolver instead of the public one | you |
 | State / logs: `/var/db/warp-killswitch/`, `/var/log/warp-*.log`, `~/.local/share/{netwatch,probesource}/`, `~/.local/state/macos-securenetwork-suite/` | |
@@ -619,6 +626,14 @@ verifies its result and tells you what it found.
   user-writable, and with free arguments it can write files as root (`-W`). With
   MacPorts' root-owned prefix the installer adds a rule pinned to the exact
   invocations `netcheck` and `nettop` use; anything else still prompts.
+- **LuLu questions the suite's own probes.** With LuLu running, the first
+  `nmap`, `arp-scan`, `speedtest` or probesource tactic to reach out raises a
+  LuLu alert. These are command-line tools, so *allow installed applications*
+  doesn't cover them. Allow each one once. LuLu's rules match the binary, so a
+  `brew upgrade` that replaces it can ask again. `uninstall.sh` leaves LuLu,
+  KnockKnock and BlockBlock in place. LuLu's network extension and BlockBlock's
+  daemon outlive a dragged-out app, so remove those two with their own
+  uninstallers.
 - **`probesource`'s active and aggressive tactics send packets to the target.**
   Use them only on hosts and networks you own or are authorised to test.
 - **Lint is clean and enforced.** CI fails on any `shellcheck` warning across
