@@ -43,9 +43,8 @@
 #
 # Callers provide grn/ylw/red/fail (install.sh does); fallbacks are defined below.
 
-type grn >/dev/null 2>&1 || grn() { printf '%s\n' "$*"; }
-type ylw >/dev/null 2>&1 || ylw() { printf '%s\n' "$*"; }
-type red >/dev/null 2>&1 || red() { printf '%s\n' "$*" >&2; }
+# shellcheck source=common.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/common.sh"   # red/grn/ylw/die/have/root_only_chain
 type fail >/dev/null 2>&1 || fail() { red "  ✗ $*"; }
 
 OS_VER=$(/usr/bin/sw_vers -productVersion)
@@ -171,17 +170,7 @@ pkg_bash4() {
     [ -x "$b" ] && [ "$("$b" -c 'echo ${BASH_VERSINFO[0]}')" -ge 4 ] 2>/dev/null && echo "$b"
 }
 
-pkg_root_owned() {
-    local p="$1" owner mode
-    while :; do
-        [ -e "$p" ] || return 1
-        owner=$(/usr/bin/stat -f %u "$p"); mode=$(/usr/bin/stat -f %Lp "$p")
-        [ "$owner" = 0 ] || return 1
-        case "$mode" in *[2367]?|*?[2367]) return 1 ;; esac   # group- or world-writable
-        [ "$p" = / ] && return 0
-        p=$(dirname "$p")
-    done
-}
+pkg_root_owned() { root_only_chain "$1"; }   # lib/common.sh: real file, root-owned chain, nothing group/world-writable
 
 # ---- bootstrap the manager -------------------------------------------------------
 

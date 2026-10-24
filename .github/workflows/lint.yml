@@ -16,7 +16,7 @@ jobs:
     name: shellcheck (bash + sh tools)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5 — pinned to a commit, not a movable tag (4.1 CVE/supply-chain scrub)
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
@@ -25,41 +25,38 @@ jobs:
         id: files
         run: |
           files=""
-          for f in install.sh uninstall.sh lib/pkg.sh $(find components -type f ! -name '*.md' ! -name '*.zsh' ! -name '*.in' ! -name '*.plist.in' ! -name '*.mobileconfig*' ! -name '*.js' ! -name '*.bash'); do
+          for f in install.sh uninstall.sh lib/common.sh lib/pkg.sh $(find components -type f ! -name '*.md' ! -name '*.zsh' ! -name '*.in' ! -name '*.plist.in' ! -name '*.mobileconfig*' ! -name '*.js' ! -name '*.bash'); do
             [ -f "$f" ] || continue
             if head -1 "$f" | grep -qE '^#!.*\b(bash|sh)\b'; then files="$files $f"; fi
           done
           echo "files=$files" >> "$GITHUB_OUTPUT"
           echo "checking:$files"
 
-      - name: Extract the warp-killswitch helper embedded in its installer
-        run: |
-          sed -n '/^\$CAT > "\$HELPER" <<.HELPER_EOF.$/,/^HELPER_EOF$/p' components/warp-killswitch/install.sh \
-            | sed '1d;$d' > /tmp/warp-killswitch-helper.sh
-          test -s /tmp/warp-killswitch-helper.sh
-
       - name: Syntax check
         run: |
-          for f in ${{ steps.files.outputs.files }} /tmp/warp-killswitch-helper.sh; do
+          # components/warp-killswitch/warp-killswitch (the root helper) is in the list:
+          # since 4.1 it is its own file, no longer a heredoc inside its installer.
+          for f in ${{ steps.files.outputs.files }}; do
             if head -1 "$f" | grep -q bash; then bash -n "$f"; else sh -n "$f"; fi
           done
+          echo "${{ steps.files.outputs.files }}" | grep -q 'components/warp-killswitch/warp-killswitch' || { echo "helper missing from lint set"; exit 1; }
 
       - name: ShellCheck (warnings are fatal)
         run: |
           # The tree is clean at warning level. Intentional word splitting carries
           # an inline `shellcheck disable=SC2046` with its reason, so a new warning
           # here means new code, not legacy noise.
-          shellcheck -S warning ${{ steps.files.outputs.files }} /tmp/warp-killswitch-helper.sh
+          shellcheck -S warning ${{ steps.files.outputs.files }}
 
       - name: ShellCheck style (informational)
         continue-on-error: true
-        run: shellcheck -S style ${{ steps.files.outputs.files }} /tmp/warp-killswitch-helper.sh || true
+        run: shellcheck -S style ${{ steps.files.outputs.files }} || true
 
   zsh:
     name: zsh syntax (shell component)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5 — pinned to a commit, not a movable tag (4.1 CVE/supply-chain scrub)
       - name: Install zsh
         run: sudo apt-get update && sudo apt-get install -y zsh
       - name: zsh -n
@@ -72,7 +69,7 @@ jobs:
     name: property lists and profiles are well-formed XML
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5 — pinned to a commit, not a movable tag (4.1 CVE/supply-chain scrub)
       - name: Install libxml2
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils
       - name: xmllint
@@ -81,15 +78,50 @@ jobs:
           # the launchd template has @BASH@/@HOME@ placeholders; it is still XML
           xmllint --noout components/netwatch/com.netwatch.plist.in
 
+  sudoers:
+    name: sudoers templates render to rules visudo accepts, with no wildcards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5 — pinned to a commit, not a movable tag (4.1 CVE/supply-chain scrub)
+      - name: Render as install.sh does and validate
+        run: |
+          set -e
+          for f in components/sudoers/*.in; do
+            sed -e 's|@USER@|alice|g' -e 's|@DNS_ON@|94.140.14.140 94.140.14.141 9.9.9.9 1.1.1.2|g' \
+                -e 's|@DNS_OFF@|9.9.9.9 1.1.1.2|g' "$f" > /tmp/rule
+            sudo visudo -cf /tmp/rule
+            # A wildcard in a NOPASSWD argument list is exactly what the 4.1 audit removed.
+            if grep -v '^#' /tmp/rule | grep -q '[*?]'; then echo "wildcard in $f"; exit 1; fi
+          done
+          # The kill-switch sudoers rule its installer generates, rendered the same way
+          sed -n "s|^    printf '%s ALL=(root) NOPASSWD: \(.*\)\\\\n' .*|alice ALL=(root) NOPASSWD: \1|p" components/warp-killswitch/install.sh \
+            | sed 's|%s|/Library/PrivilegedHelperTools/warp-killswitch|g' > /tmp/ks-rule
+          test -s /tmp/ks-rule && cat /tmp/ks-rule && sudo visudo -cf /tmp/ks-rule
+          if grep -q '[*?]' /tmp/ks-rule; then echo "wildcard in kill-switch rule"; exit 1; fi
+
+  notifications:
+    name: no shell text spliced into AppleScript source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5 — pinned to a commit, not a movable tag (4.1 CVE/supply-chain scrub)
+      - name: osascript gets text as arguments only
+        run: |
+          # `display notification "$var"` built by the shell was the 4.1 audit's injection
+          # finding (SSIDs are attacker-chosen). Every call must pass text via `on run argv`.
+          if grep -rnE 'osascript .*-e "display (notification|dialog) \\"\$' --include='*.sh' --include=netwatch --include=nettop --include=netcheck --include=probesource .; then
+            echo "shell variable interpolated into AppleScript source — pass it as an argument"; exit 1
+          fi
+          echo "clean"
+
   license:
     name: license headers
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5 — pinned to a commit, not a movable tag (4.1 CVE/supply-chain scrub)
       - name: Every tool carries an SPDX MIT header
         run: |
           missing=0
-          for f in install.sh uninstall.sh lib/pkg.sh $(find components -type f ! -name '*.md' ! -name '*.plist.in' ! -name '*.mobileconfig*' ! -name '*.js*'); do
+          for f in install.sh uninstall.sh lib/common.sh lib/pkg.sh $(find components -type f ! -name '*.md' ! -name '*.plist.in' ! -name '*.mobileconfig*' ! -name '*.js*'); do
             [ -f "$f" ] || continue
             if ! grep -q 'SPDX-License-Identifier: MIT' "$f"; then
               echo "MISSING LICENSE: $f"

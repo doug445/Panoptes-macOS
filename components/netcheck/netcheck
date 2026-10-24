@@ -342,7 +342,7 @@ if launchctl list 2>/dev/null | grep -q "com.netwatch"; then
         tail -3 "${HOME}/.local/share/netwatch/events.log" | sed 's/^/  /'
     fi
 else
-    echo -e "  ${RED}Not loaded${NC} — load with: launchctl load ~/Library/LaunchAgents/com.netwatch.plist"
+    echo -e "  ${RED}Not loaded${NC} — load with: launchctl bootstrap gui/\$(id -u) ~/Library/LaunchAgents/com.netwatch.plist"
 fi
 
 # Wi-Fi MAC randomization

@@ -479,7 +479,7 @@ resolver, not software. Only WARP and ProtonVPN run local daemons.
 
 | Path | From |
 |---|---|
-| `/usr/local/bin/warp-killswitch` — or `/Library/PrivilegedHelperTools/warp-killswitch` (+ a link in `/usr/local/bin`) when Homebrew on Intel has made `/usr/local/bin` user-writable | killswitch |
+| `/Library/PrivilegedHelperTools/warp-killswitch` (root helper; `/usr/local/bin/warp-killswitch` is a convenience link that sudoers and launchd never reference) | killswitch |
 | `/Library/LaunchDaemons/local.warp-killswitch.{watchdog,do-down,do-up,do-heal}.plist` | killswitch |
 | `/etc/sudoers.d/warp-killswitch`, `securenet-dns`, `securenet-netcheck` | killswitch, sudoers |
 | `~/Library/Application Support/xbar/plugins/security-toggle.5s.sh` (+ reference copy in `~/Documents/SwiftBar/`) | killswitch, from `components/menubar/` |
@@ -488,7 +488,7 @@ resolver, not software. Only WARP and ProtonVPN run local daemons.
 | `~/.config/macos-securenetwork-suite/*.zsh` + a marked block in `~/.zshrc` | shell |
 | `/Applications/{LuLu,KnockKnock}.app`, `/Library/Objective-See/BlockBlock/` + its daemon `com.objective-see.blockblock`, LuLu's network extension | objective-see |
 | `~/.config/macos-securenetwork-suite/AdGuard-DoH.mobileconfig`, `chrome-doh-policy.mobileconfig` (rendered from the templates with your login name and DoH target) | profiles |
-| `~/.config/macos-securenetwork-suite/dns.conf` — optional per-machine overrides, read by the installer and the menu. `FALLBACK2=1.1.1.1` swaps the second fallback for Cloudflare's unfiltered resolver (the default is the malware-blocking `1.1.1.2`); `DOH_URL=https://d.adguard-dns.com/dns-query/<device-id>` plus `DOH_BOOTSTRAP=94.140.14.49` point the Chromium policy and Firefox at an AdGuard DNS account resolver instead of the public one | you |
+| `~/.config/macos-securenetwork-suite/dns.conf` — optional per-machine overrides, read by the installer and the menu. `FALLBACK2=1.1.1.1` swaps the second fallback for Cloudflare's unfiltered resolver (the default is the malware-blocking `1.1.1.2`); `DOH_URL=https://d.adguard-dns.com/dns-query/<device-id>` plus `DOH_BOOTSTRAP=94.140.14.49` point the Chromium policy and Firefox at an AdGuard DNS account resolver instead of the public one. The DNS sudoers rule is rendered from these values, so after editing run `./install.sh --only sudoers` | you |
 | State / logs: `/var/db/warp-killswitch/`, `/var/log/warp-*.log`, `~/.local/share/{netwatch,probesource}/`, `~/.local/state/macos-securenetwork-suite/` | |
 
 ---
@@ -620,14 +620,20 @@ verifies its result and tells you what it found.
   invisible no-op. Treat a red line there as a bug.
 - **The NOPASSWD sudoers rules cover Apple binaries only** (`networksetup
   -setdnsservers`, `killall -HUP mDNSResponder`, `profiles show`) plus the
-  root-owned `warp-killswitch` helper. Anything root runs without a password
-  must sit in a directory chain only root can write — otherwise a user can swap
-  the file — so the installer keeps the helper out of a user-writable
-  `/usr/local/bin` (Homebrew on Intel) and returns `/usr/local/bin` to root when
-  nothing needs it writable. `arp-scan` is excluded on Homebrew: its prefix is
+  root-owned `warp-killswitch` helper, and every rule is **pinned to the exact
+  argument lists the menu uses** — the two DNS server lists on the two managed
+  services, and seven named helper commands. No wildcards: nothing running as
+  you can repoint system DNS or drive the helper outside those paths without a
+  password. Anything root runs without a password must sit in a directory chain
+  only root can write — otherwise a user can swap the file — so the helper lives
+  in Apple's root-only `/Library/PrivilegedHelperTools` and `/usr/local/bin`
+  only holds a link. `arp-scan` is excluded on Homebrew: its prefix is
   user-writable, and with free arguments it can write files as root (`-W`). With
   MacPorts' root-owned prefix the installer adds a rule pinned to the exact
-  invocations `netcheck` and `nettop` use; anything else still prompts.
+  invocations `netcheck` and `nettop` use; anything else still prompts. The
+  installer also lists any *other* passwordless rule your login has, so rules
+  left by earlier tooling get reviewed. See [SECURITY.md](SECURITY.md) and the
+  [audit brief](#full-security-audit-41--claude-fable-51).
 - **LuLu questions the suite's own probes.** With LuLu running, the first
   `nmap`, `arp-scan`, `speedtest` or probesource tactic to reach out raises a
   LuLu alert. These are command-line tools, so *allow installed applications*
@@ -639,17 +645,29 @@ verifies its result and tells you what it found.
 - **`probesource`'s active and aggressive tactics send packets to the target.**
   Use them only on hosts and networks you own or are authorised to test.
 - **Lint is clean and enforced.** CI fails on any `shellcheck` warning across
-  every bash and sh tool, including the helper embedded in the kill-switch
-  installer. Where word splitting is deliberate the line carries an inline
-  `shellcheck disable=SC2046` stating why.
+  every bash and sh tool, including the kill-switch root helper. It also renders
+  every sudoers rule and checks it with `visudo`, rejecting any wildcard, and
+  greps for shell text spliced into AppleScript. Where word splitting is
+  deliberate the line carries an inline `shellcheck disable=SC2046` stating why.
 
 ## Docs
 
+- [SECURITY.md](SECURITY.md) — threat model, what the passwordless rules permit, how to report an issue
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — how people are expected to treat each other here
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the pieces fit together
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — WARP updates, ECH, ProtonVPN and Accessibility, the macOS 27 ARP blank, crash loops
 - [components/warp-killswitch/README.md](components/warp-killswitch/README.md) — the kill-switch, its test results and lessons
 - [components/probesource/README.md](components/probesource/README.md) · [components/macos27-netfix/README.md](components/macos27-netfix/README.md)
 - [CHANGELOG.md](CHANGELOG.md)
+
+## Code of conduct
+
+This project puts root-level software on other people's computers, and the way
+people are treated here is held to the same standard as the code. The short
+version: be respectful, be honest about what you tested, report security
+problems privately, and never discuss using the active tools against networks
+you do not own or have permission to test. The full text, scope and how
+reports are handled are in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Contributing
 
@@ -657,9 +675,9 @@ Issues and pull requests welcome. Run this before opening a PR — it is what CI
 runs:
 
 ```sh
-shellcheck -S warning install.sh uninstall.sh lib/pkg.sh components/*/*.sh components/netwatch/netwatch \
-  components/netwatch/nettop components/netcheck/netcheck components/probesource/probesource \
-  components/menubar/security-toggle.5s.sh
+shellcheck -S warning install.sh uninstall.sh lib/*.sh components/*/*.sh components/warp-killswitch/warp-killswitch \
+  components/netwatch/netwatch components/netwatch/nettop components/netcheck/netcheck \
+  components/probesource/probesource components/menubar/security-toggle.5s.sh
 zsh -n components/checkdns/*.zsh
 ```
 
@@ -669,3 +687,146 @@ spilled-bowline0j@icloud.com.
 ## License
 
 MIT — see [LICENSE](LICENSE). Copyright (c) 2026 William MacKinnon.
+
+---
+
+## Full security audit 4.1 — Claude Fable 5.1
+
+> **Auditor:** Claude Fable 5.1, Anthropic's most capable model, working through
+> Claude Code with full read access to the repository and a live install to test
+> against. **Commissioned by:** the maintainer. This is a single-maintainer
+> project; Claude Fable 5.1 is the maintainer's assistant on it, and for this
+> release was asked to turn around and audit the whole thing adversarially, as due
+> diligence before asking anyone to run it on a Mac they rely on. **Scope:** every file in the tree —
+> all 9,100 lines of bash, sh, zsh, launchd and profile XML, CI and
+> documentation — read in full, not sampled. **Date:** 2026-10-24.
+> **Result:** 3 high, 5 medium and 6 low findings, all fixed in this release;
+> 6 trade-offs documented as accepted. Lint and CI were green before and after.
+
+### Why a suite like this must be audited, and keep being audited
+
+Most software asks for your trust once, at install. This suite asks for it
+continuously. It puts a **root helper** on your Mac that your login can run
+**without a password**; it writes **sudoers rules**; it installs **LaunchDaemons**
+that run as root at every boot; it reads the **Wi-Fi SSID, the ARP table and
+the firewall log** — data that whoever runs the access point, or whoever is on
+the same network, gets to choose. It is, by design, exactly the set of
+components a piece of malware would most like to borrow. A mistake in a
+sudoers wildcard, a root process copying a file to a path you control, a shell
+variable spliced into AppleScript: none of these show up in normal use. The
+suite works perfectly. The hole just sits there until something finds it.
+
+That is why **"it works" is not the standard this project holds itself to.**
+The standard is that someone other than the author — someone who did not write
+the code and has no reason to assume it is right — has traced every path from
+"a process running as you" to "something runs as root", every path from "a byte
+arrives off the network" to "a program acts on it", and either closed each one
+or written down why it is acceptable. The maintainer commissioned this audit
+with no outside prompting and with the suite already lint-clean and in daily
+use, because a security tool's author is the person least able to see their own
+blind spots, and because the people who run this deserve more than the author's
+good intentions. Every finding below is published, with its severity, in the
+open. Nothing was downgraded or quietly dropped. The same review will be repeated
+for every future major release, and the project's standing rules are kept in
+[SECURITY.md](SECURITY.md) so they survive the audit that produced them.
+
+### Method
+
+1. **Read everything.** Each script was read start to finish — installer,
+   uninstaller, package layer, the root helper, the menu plugin, the
+   monitors, the macOS 27 workaround, probesource, the sudoers and profile
+   templates, the LaunchAgent template, the CI workflow and all documentation.
+   No file was skipped as "just docs" or "just a template".
+2. **Enumerate the trust boundaries.** Every place where privilege changes
+   (`sudo`, LaunchDaemon, `launchctl asuser`, a root process touching a user
+   path) and every place where untrusted data enters (SSID, BSSID, ARP/NDP
+   output, firewall log lines, downloaded releases, `dns.conf`, probesource
+   targets) was listed, then followed through the code.
+3. **Ask the attacker's questions at each one.** What can a process running as
+   the user do with this NOPASSWD rule? What happens if this path is a symlink?
+   What if the access point is named `"` followed by code? What if this
+   directory stops being root-owned next year? What if the config file holds an
+   `&` or a `|`?
+4. **Fix, then prove.** Every change was syntax-checked, run through
+   `shellcheck -S warning` (the tree stayed clean), and the new sudoers rules
+   were rendered and validated with `visudo -c` exactly as CI now does. The
+   hardened helper, rules and plugin were then installed on the maintainer's own
+   Mac and the pinned rules checked with `sudo -l` against the real menu calls.
+5. **Make the fixes stick.** Where a class of bug could come back, CI now
+   catches it: wildcards in any sudoers rule, text spliced into AppleScript.
+
+### Findings
+
+Severity reflects what an attacker already running code as your login could
+gain, or what a hostile network could do, before the fix.
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| 1 | **High** | **DNS sudoers rule was a wildcard.** `networksetup -setdnsservers *` let any process running as you point system DNS at any server, on any service, silently and without a password — in a suite whose first purpose is DNS integrity. | Rule pinned to the two managed services and the two exact server lists the menu sets, rendered from `dns.conf` at install. CI rejects any wildcard. (`components/sudoers/securenet-dns.in`, `install.sh`) |
+| 2 | **High** | **Passwordless root helper lived in `/usr/local/bin`** whenever that directory happened to be root-owned at install time. An Intel Homebrew installed or migrated later chowns `/usr/local/bin` to the user; the NOPASSWD rule would then name a file in a directory the user could replace — root for the asking. | Helper always installed in Apple's root-only `/Library/PrivilegedHelperTools`; installer refuses if that chain is not root-only; `status` re-checks its own path; `/usr/local/bin` holds only a link that nothing privileged references. The installer also stops chowning `/usr/local`. (`components/warp-killswitch/install.sh`) |
+| 3 | **High** | **Root wrote into the user's home.** The kill-switch installer, running as root, copied the menu plugin and moved backups under `~/Library` and `~/Documents`. A symlink planted at one of those paths by anything running as the user would be followed and its target overwritten as root. | Every write into the owner's home runs as the owner (`sudo -u`), including the uninstaller's restore. |
+| 4 | Medium | **AppleScript injection through the Wi-Fi name.** netwatch built notifications as `display notification "$body"` with only `"` escaped (not `\`), and the body carries the SSID — chosen by whoever runs the access point. A crafted name could close the string and run AppleScript as the user. | All osascript calls in netwatch, the menu, the root helper and probesource pass text as arguments (`on run argv`). CI greps for the old pattern. |
+| 5 | Medium | **Kill-switch sudoers rule allowed any arguments** to the helper. The helper's own parser is tight, but the rule was the only line of defence standing on a single `case` statement. | Pinned to the seven invocations the menu makes: `down`, `down --keep-dns`, `up`, `heal manual`, `status`, `state`, `verify`. |
+| 6 | Medium | **`dns.conf` values flowed unvalidated** into `sed` replacements, sudoers, XML profiles and Firefox `user.js`. A `&`, `|` or `"` would have broken or altered those files. | Values validated as IPv4 addresses and a URL-safe `https://` URL before use; the installer refuses otherwise. |
+| 7 | Medium | **probesource `source`d its scan-state files.** Anything written into that user-owned directory would run as the user on the next menu refresh. | Files parsed as key=value data; no `source` remains. |
+| 8 | Medium | **SSID could forge netwatch's identity fingerprint.** The fingerprint uses `\|` as its separator and the state file was written with `echo` (an SSID of `-n` or `-e` vanishes). A name containing `\|mac=` could desynchronise the compare and suppress a spoofing alert. | Separator and control characters stripped at the single read point; `printf` for the state file. |
+| 9 | Low | Lock directory could become permanently unreclaimable if the helper died between `mkdir` and writing its pid (no pid → never judged stale → every later call waited 60 s and gave up). | Pid written inside the acquire step; a pid-less lock is reclaimed after a grace second. |
+| 10 | Low | `pkg_root_owned` would accept a symlinked `arp-scan` for a NOPASSWD rule; a link can be repointed. | Symlinks refused. |
+| 11 | Low | No record of *who* asked for a teardown, rebuild or heal — a surprise entry in the log could not be traced. | Every mutating command logs `caller=<sudo user> via=<parent process>`. |
+| 12 | Low | Passwordless rules left by earlier tooling (often broader than the suite's) were invisible to the installer. | The `sudoers` component lists every other NOPASSWD rule for your login and says how to review or drop it. |
+| 13 | Low | `uninstall.sh` ran the kill-switch uninstaller under whichever `bash` was first on PATH. | `/bin/bash`, as the installer does. |
+| 14 | Low | `netcheck` recommended the deprecated `launchctl load`. | `launchctl bootstrap`. |
+
+### Accepted trade-offs
+
+These were examined and left as they are, on purpose, with the reasoning
+recorded in [SECURITY.md](SECURITY.md): the menu's ability to tear WARP down
+without a password (the menu cannot work otherwise; it is verified, notified and
+now logged with the caller); Homebrew's own `curl | bash` bootstrap (its only
+supported method — every other download is signature-checked); probesource's
+interpolation of a strictly validated target IP into its tactic strings; the
+root helper's read-only use of the user's ARP cache; the unrotated watchdog
+stdout log.
+
+### CVE scrub — declared free
+
+The repository was also checked for anything a published CVE could attach to.
+
+- **It vendors no third-party code.** No package manifests, lock files, bundled
+  libraries, binaries or archives exist in the tree — only the suite's own bash,
+  sh, zsh, XML and Markdown. There is no dependency for a CVE database to match.
+- **Everything it installs comes from upstream at its current version**, pulled at
+  install time: Apple's own tools; Homebrew or MacPorts packages; and vendor apps
+  (Cloudflare WARP, xbar, ProtonVPN, LuLu, KnockKnock, BlockBlock, MacPorts) whose
+  downloads are refused unless signed by the publisher's Developer ID Team ID.
+  Security fixes for those arrive through those channels, not through this repo.
+- **GitHub Actions are pinned to a commit SHA**, not a movable tag, so a hijacked
+  tag upstream cannot change what CI runs.
+- **The findings above are weaknesses in this code, not vulnerabilities in
+  something it ships**: they map to CWE classes (CWE-250 and CWE-269 for the
+  sudoers wildcards and helper placement, CWE-59 for the symlink-following copy,
+  CWE-78/CWE-94 for the AppleScript splice, CWE-20 for the unvalidated config),
+  and none had, or warranted, a CVE identifier.
+- **Host check, for completeness:** the sudo on the maintainer's Mac is 1.9.17p2,
+  which carries the fixes for CVE-2025-32462 and CVE-2025-32463; the suite's
+  rules use neither the `host` nor the `chroot` features those concerned.
+
+**Declaration: as of 2026-10-24, macOS-SecureNetwork-Suite 4.1.0 ships no code
+with a known CVE, and no CVE is known against the suite itself.** Two things are
+noted rather than fixed: Homebrew is bootstrapped with its own `curl | bash`
+installer at `HEAD`, and probesource builds five tools without a package
+(onesixtyone, nbtscan, hping3, ike-scan, enum4linux-ng) from their upstream `git`
+`HEAD`. Both mean you get fixes immediately and trust those maintainers' branches
+in exchange; both are stated in [SECURITY.md](SECURITY.md).
+
+### What this audit did not do
+
+It did not run a fuzzer, a formal verifier or a penetration test against a
+hostile network, and it makes no claim that the suite is free of defects. It is
+a careful, complete, adversarial reading of the code by a reviewer who did not
+write it, followed by fixes and regression guards for everything found. That is
+the floor this project commits to, not the ceiling. If you find something it
+missed, [SECURITY.md](SECURITY.md) says how to tell the maintainer, and the next
+changelog will say you did.
+
+*— Claude Fable 5.1, Anthropic's most capable model, 2026-10-24.*

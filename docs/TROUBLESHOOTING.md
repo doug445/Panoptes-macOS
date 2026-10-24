@@ -71,6 +71,29 @@ It is crash-looping, not repeating: launchd `KeepAlive` restarts it on
 `~/.local/share/netwatch/events.log`, and
 `launchctl print gui/$(id -u)/com.netwatch` for `last exit code` / `runs`.
 
+## The menu's AdGuard DNS Enable / Disable items stopped working after I edited dns.conf
+
+Since 4.1 the passwordless rule in `/etc/sudoers.d/securenet-dns` names the
+exact server lists the menu sets, rendered from `dns.conf` when the `sudoers`
+component runs. Change `FALLBACK1`/`FALLBACK2` and the menu's `sudo -n` call no
+longer matches, so it fails silently (the icon just does not change). Re-render
+the rule:
+
+```sh
+./install.sh --only sudoers
+```
+
+The same applies if the menu ever says the kill-switch items do nothing: the
+helper rule names `/Library/PrivilegedHelperTools/warp-killswitch` with seven
+fixed argument lists. `./install.sh --only killswitch` regenerates helper, rule
+and plugin together.
+
+## `sudo warp-killswitch status` asks for a password
+
+Expected since 4.1. The passwordless rule covers only the menu's own calls to
+the helper's real path; the `/usr/local/bin/warp-killswitch` you type is a
+convenience link, and interactive use goes through the normal sudo prompt.
+
 ## Two copies of the menu-bar icons
 
 xbar executes every executable file in its plugin folder, so a `*.bak` left

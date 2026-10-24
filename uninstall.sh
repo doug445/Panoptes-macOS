@@ -26,7 +26,7 @@ C="$HERE/components"
 sudo -v || exit 1
 
 echo "== warp-killswitch"
-sudo bash "$C/warp-killswitch/install.sh" --uninstall --user "$USER"
+sudo /bin/bash "$C/warp-killswitch/install.sh" --uninstall --user "$USER"
 
 echo "== macOS 27 ARP-cache workaround"
 [ -f "$HOME/Library/LaunchAgents/com.netwatch.arpcache.plist" ] && /bin/sh "$C/macos27-netfix/uninstall.sh"

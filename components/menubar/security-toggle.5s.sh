@@ -1,6 +1,6 @@
 #!/bin/bash
 # <xbar.title>Security Toggle</xbar.title>
-# <xbar.version>3.1</xbar.version>
+# <xbar.version>3.2</xbar.version>
 # <xbar.author>William MacKinnon</xbar.author>
 # <xbar.desc>WARP, AdGuard DNS and ProtonVPN toggles + WARP kill-switch / heal / status</xbar.desc>
 # <xbar.abouturl>https://github.com/doug445/macOS-SecureNetwork-Suite</xbar.abouturl>
@@ -45,7 +45,9 @@ unset LESS LESS_TERMCAP_mb LESS_TERMCAP_md LESS_TERMCAP_me \
 
 WARP_CLI="/usr/local/bin/warp-cli"
 [ -x "$WARP_CLI" ] || WARP_CLI="$(command -v warp-cli || echo /usr/local/bin/warp-cli)"
-KILLSWITCH="/usr/local/bin/warp-killswitch"
+# The root helper's fixed home (Apple's root-only directory). The NOPASSWD rule names this
+# exact path with the exact argument lists used below; /usr/local/bin only holds a link.
+KILLSWITCH="/Library/PrivilegedHelperTools/warp-killswitch"
 KILL_MARKER="/var/db/warp-killswitch/killed"
 STATE_DIR="$HOME/.local/state/macos-securenetwork-suite"
 PARK_MARKER="$STATE_DIR/warp-parked-for-protonvpn"   # WARP was parked BY the menu for ProtonVPN
@@ -77,9 +79,12 @@ tmo() { local s="$1" pid i=0; shift; "$@" & pid=$!; while /bin/kill -0 "$pid" 2>
 # wait_for SECONDS FUNC EXPECTED — poll a status function until it reports the expected word
 wait_for() { local s="$1" fn="$2" want="$3" i=0; while [ "$i" -lt "$s" ]; do [ "$($fn)" = "$want" ] && return 0; /bin/sleep 1; i=$((i+1)); done; [ "$($fn)" = "$want" ]; }
 flush_dns() { /usr/bin/dscacheutil -flushcache >/dev/null 2>&1; /usr/bin/sudo -n /usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1; }
-note() { /usr/bin/osascript -e "display notification \"$2\" with title \"$1\"" >/dev/null 2>&1; }
+# text is passed as osascript arguments, never spliced into AppleScript source
+note() { /usr/bin/osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' -- "$1" "$2" >/dev/null 2>&1; }
 refresh_menu() { /usr/bin/open -g "xbar://app/refreshPlugin?path=$(basename "$0")" >/dev/null 2>&1; }
 set_dns() {   # set_dns SERVER... — on every managed service
+  # /etc/sudoers.d/securenet-dns allows exactly these two server lists on exactly these
+  # services; change the lists in dns.conf and re-run `./install.sh --only sudoers`.
   local svc
   for svc in "${DNS_SERVICES[@]}"; do
     /usr/bin/sudo -n /usr/sbin/networksetup -setdnsservers "$svc" "$@" >/dev/null 2>&1
@@ -198,8 +203,8 @@ case "${1:-}" in
     /usr/bin/sudo -n "$KILLSWITCH" heal manual >/dev/null 2>&1
     refresh_menu; exit 0 ;;
   killswitch_status)
-    out=$(/usr/bin/sudo -n "$KILLSWITCH" status 2>&1 | /usr/bin/sed 's/\\/\\\\/g; s/"/'"'"'/g')
-    /usr/bin/osascript -e "display dialog \"$out\" with title \"WARP status\" buttons {\"OK\"} default button 1" >/dev/null 2>&1
+    out=$(/usr/bin/sudo -n "$KILLSWITCH" status 2>&1)
+    /usr/bin/osascript -e 'on run argv' -e 'display dialog (item 1 of argv) with title "WARP status" buttons {"OK"} default button 1' -e 'end run' -- "$out" >/dev/null 2>&1
     exit 0 ;;
   proton_on)
     if [[ "$(killed_status)" == "no" ]]; then

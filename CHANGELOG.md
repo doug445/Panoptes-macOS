@@ -3,6 +3,96 @@
 All notable changes to macOS-SecureNetwork-Suite are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
 
+## [4.1.0] — 2026-10-24 — full security audit release
+
+A **full security audit** and code review of the suite by **Claude Fable 5.1,
+Anthropic's most capable model**. This is a single-maintainer project; Fable is
+the maintainer's assistant on it and was asked to audit the whole thing
+adversarially, as due diligence on a project that installs a passwordless root helper, sudoers rules, LaunchDaemons
+and a network monitor on people's Macs. Every line of every script was read,
+every privilege boundary traced, every finding fixed in the open. The full
+brief, with severities and the reasoning behind each fix, is at the end of the
+[README](README.md#full-security-audit-41--claude-fable-51). Upgrading is the usual
+`git pull && ./install.sh`; the installer regenerates everything below.
+
+### Security
+
+- **The menu's DNS sudoers rule is pinned to exact argument lists.** It was
+  `networksetup -setdnsservers *`, which let any process running as you point
+  system DNS anywhere, on any service, without a password — the one thing a
+  private-DNS suite must not allow. The rule now names the two services the menu
+  manages and the two server lists it sets (AdGuard on, fallback off), rendered
+  from `dns.conf` at install time. Edit `dns.conf` → `./install.sh --only sudoers`.
+- **The kill-switch helper always lives in `/Library/PrivilegedHelperTools`.**
+  It used to sit in `/usr/local/bin` whenever that directory was root-owned at
+  install time — a judgement about a moment. An Intel Homebrew installed or
+  migrated later chowns `/usr/local/bin` to the user, and the NOPASSWD rule would
+  have pointed into a user-writable directory. Apple's helper directory is
+  root-only by construction; the installer refuses to proceed if it is not, the
+  helper's `status` re-checks its own path, and `/usr/local/bin/warp-killswitch`
+  is now a convenience symlink that nothing privileged references. The
+  installer no longer chowns `/usr/local` either.
+- **The kill-switch sudoers rule is pinned too**: `down`, `down --keep-dns`,
+  `up`, `heal manual`, `status`, `state`, `verify` — what the menu calls, and
+  nothing else, passwordless.
+- **Root never writes into your home.** The kill-switch installer copied the
+  menu plugin and its backups into `~/Library` and `~/Documents` as root; a
+  symlink planted at one of those paths would have been followed and its target
+  overwritten with root's permissions. Every such write now runs as the menu
+  owner.
+- **Nothing is spliced into AppleScript source any more.** netwatch's
+  notifications were built as `display notification "$body"` with only the
+  double quotes escaped, and the body carries the Wi-Fi SSID — a value chosen
+  by whoever runs the access point. The menu, the helper and probesource had
+  the same pattern with internal text. All of them now pass text as osascript
+  arguments (`on run argv`), and CI fails on any reintroduction.
+- **`dns.conf` values are validated** before they reach sudoers, the XML
+  profiles or Firefox's `user.js`: IPv4 addresses must be addresses, the DoH URL
+  must be an `https://` URL made of URL-safe characters.
+- **probesource no longer `source`s its scan-state files**; they are parsed as
+  key=value data.
+- **SSIDs are sanitised** before they enter netwatch's identity fingerprint
+  (`|` is its field separator) or its state file (`printf`, not `echo`).
+- **A NOPASSWD `arp-scan` rule is never written for a symlink.**
+
+### Added
+
+- **Audit trail.** Every teardown, rebuild and manual heal logs who asked
+  (`caller=<sudo user> via=<parent process>`), so a surprise entry in
+  `/var/log/warp-killswitch.log` can be traced.
+- **The installer lists other passwordless rules.** After writing its own, the
+  `sudoers` component prints any other `/etc/sudoers.d` file that grants your
+  login NOPASSWD — rules left by earlier tooling are usually broader than the
+  suite's — and tells you how to review or drop them.
+- **CI: sudoers templates and the embedded kill-switch rule are rendered and
+  checked with `visudo`, and rejected if they contain a wildcard.** CI also
+  greps for shell text inside AppleScript source.
+- **[SECURITY.md](SECURITY.md)**: threat model, what the NOPASSWD rules do and
+  do not permit, accepted trade-offs, and how to report an issue.
+- **CVE scrub: declared free.** The tree vendors no third-party code, so no CVE
+  can attach to it; every external fetch was enumerated and is either
+  signature-verified or documented; GitHub Actions are now pinned to a commit SHA
+  rather than a movable tag. Details in the README brief and SECURITY.md.
+
+### Changed
+
+- **The repository is more modular.** The root helper is its own file,
+  `components/warp-killswitch/warp-killswitch`, installed verbatim, instead of a
+  630-line heredoc inside its installer (which shrinks from 1,022 to about 390
+  lines); CI lints it directly. Output helpers and the root-only-path check that
+  the installer, `lib/pkg.sh` and the kill-switch installer each carried their own
+  copy of now live once in `lib/common.sh`.
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** added, with a summary in the README.
+
+### Fixed
+
+- The helper's lock could never be reclaimed if its owner died between taking
+  the lock and recording its pid; the pid is now written inside the acquire step.
+- `uninstall.sh` ran the kill-switch uninstaller under whichever `bash` was on
+  PATH; it now uses `/bin/bash` like the installer.
+- `netcheck` suggested the deprecated `launchctl load`; it now suggests
+  `launchctl bootstrap`.
+
 ## [4.0.0] — 2026-10-23
 
 ### Changed

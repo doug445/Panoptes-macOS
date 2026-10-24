@@ -35,7 +35,8 @@
 #   objective-see  LuLu (outbound firewall), KnockKnock (persistence scan),
 #                BlockBlock (persistence monitor) — need your approval once
 #   dns          AdGuard DNS (no-log/no-ECS) + Quad9/Cloudflare fallback
-#   sudoers      NOPASSWD rules for the menu's DNS toggle and netcheck
+#   sudoers      NOPASSWD rules for the menu's DNS toggle and netcheck — pinned to the exact
+#                argument lists they use (re-run after editing dns.conf)
 #   warp         WARP registration, tunnel_only mode, MASQUE, connect
 #   killswitch   warp-killswitch helper + watchdog + xbar menu (security-toggle)
 #   netfix       macOS 27 ARP-cache workaround (installs only if detect.sh says so)
@@ -58,6 +59,8 @@ fi
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 C="$HERE/components"
+# shellcheck source=lib/common.sh
+. "$HERE/lib/common.sh"
 # shellcheck source=lib/pkg.sh
 . "$HERE/lib/pkg.sh"
 ALL="deps firewall objective-see dns sudoers warp killswitch netfix netwatch netcheck probesource shell profiles firefox"
@@ -72,7 +75,21 @@ DNS_CONF="$HOME/.config/macos-securenetwork-suite/dns.conf"
 # shellcheck source=/dev/null
 [ -f "$DNS_CONF" ] && . "$DNS_CONF"
 FALLBACK_DNS="$FALLBACK1 $FALLBACK2"
-render() { sed -e "s|@USER@|$USER|g" -e "s|@DOH_URL@|$DOH_URL|g" -e "s|@DOH_BOOTSTRAP@|$DOH_BOOTSTRAP|g" "$1"; }   # fill a .in template
+# dns.conf is trusted (it is yours), but its values end up inside sudoers, XML profiles
+# and Firefox prefs, so they must be the shapes those files expect — not free text.
+valid_ip4() { printf '%s' "$1" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; }
+check_conf() {
+    local v
+    for v in FALLBACK1 FALLBACK2 DOH_BOOTSTRAP; do
+        val=${!v}; valid_ip4 "$val" || die "dns.conf: $v='$val' is not an IPv4 address"
+    done
+    for v in $ADGUARD_DNS; do valid_ip4 "$v" || die "ADGUARD_DNS entry '$v' is not an IPv4 address"; done
+    printf '%s' "$DOH_URL" | grep -qE '^https://[A-Za-z0-9._~/%-]+(\?[A-Za-z0-9._~/%=-]*)?$' \
+        || die "dns.conf: DOH_URL='$DOH_URL' must be an https:// URL made of URL-safe characters"
+    printf '%s' "$USER" | grep -qE '^[A-Za-z0-9._-]+$' || die "login name '$USER' has characters the templates cannot carry"
+}
+check_conf
+render() { sed -e "s|@USER@|$USER|g" -e "s|@DOH_URL@|$DOH_URL|g" -e "s|@DOH_BOOTSTRAP@|$DOH_BOOTSTRAP|g" "$1"; }   # fill a .in template (values validated above)
 
 # Generic names; lib/pkg.sh maps them per manager (speedtest -> speedtest-go on Homebrew,
 # speedtest-cli on MacPorts).
@@ -85,12 +102,7 @@ SHELL_DIR="$HOME/.config/macos-securenetwork-suite"
 BIN="$HOME/.local/bin"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
-red() { printf '\033[31m%s\033[0m\n' "$*"; }
-grn() { printf '\033[32m%s\033[0m\n' "$*"; }
-ylw() { printf '\033[33m%s\033[0m\n' "$*"; }
-hdr() { printf '\n\033[1;36m══ %s ══\033[0m\n' "$*"; }
-die() { red "ERROR: $*"; exit 1; }
-have() { command -v "$1" >/dev/null 2>&1; }
+# red/grn/ylw/hdr/die/have come from lib/common.sh
 # Where profiles are approved: System Preferences (11–12), System Settings (13), and
 # System Settings › General › Device Management (14+).
 profiles_pane() {
@@ -286,9 +298,14 @@ fi
 # ---- sudoers ----------------------------------------------------------------
 if want sudoers; then
     hdr "sudoers rules"
+    # The menu's DNS toggle sets exactly two server lists on exactly two services (see
+    # components/menubar/security-toggle.5s.sh: set_dns on DNS_SERVICES). The rule names
+    # those argument lists verbatim, so no other process running as you can repoint
+    # system DNS without a password. Editing dns.conf changes the lists: re-run this component.
+    DNS_ON="$ADGUARD_DNS $FALLBACK_DNS"; DNS_OFF="$FALLBACK_DNS"
     for name in securenet-dns securenet-netcheck; do
         tmp=$(mktemp)
-        sed "s|@USER@|$USER|g" "$C/sudoers/$name.in" > "$tmp"
+        sed -e "s|@USER@|$USER|g" -e "s|@DNS_ON@|$DNS_ON|g" -e "s|@DNS_OFF@|$DNS_OFF|g" "$C/sudoers/$name.in" > "$tmp"
         # arp-scan: only with a root-owned binary in a root-owned prefix (MacPorts), and only
         # the exact invocations netcheck/nettop use — never free arguments (-W writes files).
         if [ "$name" = securenet-netcheck ] && ARPSCAN=$(pkg_bin arp-scan) && [ -n "$ARPSCAN" ] && pkg_root_owned "$ARPSCAN"; then
@@ -304,6 +321,14 @@ if want sudoers; then
         fi
         rm -f "$tmp"
     done
+    # Every other passwordless grant for this login is worth a look: rules left by earlier
+    # tooling (pre-suite names like swiftbar-dns or netcheck) are often broader than ours.
+    others=$(sudo sh -c "grep -lsE '^${USER}[[:space:]].*NOPASSWD' /etc/sudoers.d/* 2>/dev/null" \
+             | grep -vE '/(securenet-dns|securenet-netcheck|warp-killswitch)$' || true)
+    if [ -n "$others" ]; then
+        ylw "  other NOPASSWD rules for $USER exist — review them (sudo cat FILE; sudo rm FILE to drop):"
+        printf '%s\n' "$others" | sed 's/^/    /'
+    fi
 fi
 
 # ---- warp -------------------------------------------------------------------
@@ -518,12 +543,10 @@ for f in "$BIN/netwatch" "$BIN/nettop" "$BIN/netcheck" "$BIN/probesource" \
     [ -n "$bad" ] && stale="$stale\n    $f: $bad"
 done
 if sudo grep -qE "$foreign" /etc/sudoers.d/securenet-netcheck 2>/dev/null; then stale="$stale\n    /etc/sudoers.d/securenet-netcheck"; fi
-# The helper also lives there on Apple Silicon when a migrated Intel Homebrew still owns
-# /usr/local/bin; the kill-switch installer then links it from /usr/local/bin, so only
-# an unlinked copy is left over.
-if [ "$ARCH" = arm64 ] && [ -e /Library/PrivilegedHelperTools/warp-killswitch ] &&
-   [ "$(readlink /usr/local/bin/warp-killswitch 2>/dev/null)" != /Library/PrivilegedHelperTools/warp-killswitch ]; then
-    stale="$stale\n    /Library/PrivilegedHelperTools/warp-killswitch (Intel-era helper copy)"
+# Since 4.1 the helper lives only in /Library/PrivilegedHelperTools; /usr/local/bin holds a
+# link. A regular file there is a pre-4.1 helper copy the killswitch component would have replaced.
+if [ -f /usr/local/bin/warp-killswitch ] && [ ! -L /usr/local/bin/warp-killswitch ]; then
+    stale="$stale\n    /usr/local/bin/warp-killswitch (pre-4.1 helper copy; the helper now lives in /Library/PrivilegedHelperTools)"
 fi
 if [ -n "$stale" ]; then
     fail "paths from another layout remain (re-run without --only/--skip):$(printf '%b' "$stale")"
@@ -531,9 +554,8 @@ else
     grn "  layout audit clean: everything installed matches [$LAYOUT]"
     [ "$CONVERTING" -eq 1 ] && grn "  converted from [$PREV_LAYOUT]"
 fi
-for KS in /Library/PrivilegedHelperTools/warp-killswitch /usr/local/bin/warp-killswitch; do
-    [ -x "$KS" ] && [ ! -L "$KS" ] && { sudo "$KS" status 2>/dev/null | sed 's/^/  /'; break; }
-done
+KS=/Library/PrivilegedHelperTools/warp-killswitch
+[ -x "$KS" ] && sudo "$KS" status 2>/dev/null | sed 's/^/  /'
 [ -f "$HOME/Library/LaunchAgents/com.netwatch.arpcache.plist" ] && /bin/sh "$C/macos27-netfix/verify.sh" | sed 's/^/  /'
 echo
 if [ -n "$FAILED" ]; then

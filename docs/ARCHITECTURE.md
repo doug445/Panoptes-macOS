@@ -26,6 +26,29 @@
                                                                      and warp-killswitch link_ok()
 ```
 
+## Trust boundaries (what runs as root, and what can ask it to)
+
+Only three things run as root: the kill-switch helper
+(`/Library/PrivilegedHelperTools/warp-killswitch`, via its watchdog and
+re-dispatch LaunchDaemons), the Apple binaries named in the two sudoers rules
+(`networksetup -setdnsservers`, `killall -HUP mDNSResponder`, `profiles show`),
+and — only on MacPorts, where the binary is root-owned — `arp-scan` with fixed
+arguments. Everything else (netwatch, nettop, netcheck, probesource, the menu
+plugin, the ARP-cache agent) runs as you.
+
+What can cross from you to root without a password is written down in
+`/etc/sudoers.d/{securenet-dns,securenet-netcheck,warp-killswitch}` and is
+**pinned to exact argument lists** — the DNS rule to the two server lists on the
+two managed services, the helper rule to `down`, `down --keep-dns`, `up`,
+`heal manual`, `status`, `state`, `verify`. No wildcards. Both the helper and the
+installer verify the helper's directory chain is root-only before trusting it,
+and anything the installer writes into your home it writes as you, never as
+root. Data that crosses the other way — the ARP cache the helper reads from
+your home, the SSID netwatch reads from the air — is treated as untrusted text:
+format-matched, never executed, never spliced into AppleScript. The 4.1 audit by
+Claude Fable 5.1 (see the README) is the record of how these boundaries were
+checked; [SECURITY.md](../SECURITY.md) is the standing statement of them.
+
 ## Design rules carried through every component
 
 - **Prove, don't assume.** Teardown verifies plain internet works and escalates

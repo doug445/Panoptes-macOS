@@ -43,10 +43,13 @@ notify() {
             -sender com.apple.Terminal 2>/dev/null || true
     else
         # osascript notification — no icon, no timeout control, but always available.
-        local esc_body esc_title
-        esc_body=$(printf '%s' "$body" | sed 's/"/\\"/g')
-        esc_title=$(printf '%s' "$display_title" | sed 's/"/\\"/g')
-        osascript -e "display notification \"${esc_body}\" with title \"NetWatch\" subtitle \"${esc_title}\"" 2>/dev/null || true
+        # The text goes in as ARGUMENTS. An SSID is attacker-chosen (any access point
+        # can be named anything), and it ends up in these notifications; spliced into
+        # AppleScript source with only the quotes escaped, a crafted name could have
+        # broken out of the string. As argv it can only ever be text.
+        osascript -e 'on run argv' \
+            -e 'display notification (item 1 of argv) with title "NetWatch" subtitle (item 2 of argv)' \
+            -e 'end run' -- "$body" "$display_title" 2>/dev/null || true
     fi
 }
 
@@ -253,7 +256,11 @@ get_current_ssid() {
             | sed -n 's/^Current Wi-Fi Network: //p' || true)
     fi
 
-    printf '%s' "$ssid"
+    # An SSID is up to 32 arbitrary bytes chosen by whoever runs the access point. It is
+    # stored in the identity fingerprint, which uses '|' as its field separator, and in
+    # a one-line state file: drop the separator and control characters so a name cannot
+    # forge or split a field. (It is compared only against itself, so this is lossless.)
+    printf '%s' "$ssid" | tr -d '|\000-\037\177'
 }
 
 # A gateway's IP staying put while its layer-2 identity changes is the actual
@@ -356,7 +363,7 @@ check_new_network() {
     stored_ssid=$(cat "$LOG_DIR/current_ssid" 2>/dev/null || true)
 
     if [[ "$current_ssid" != "$stored_ssid" ]] && [[ -n "$current_ssid" ]]; then
-        echo "$current_ssid" > "$LOG_DIR/current_ssid"
+        printf '%s\n' "$current_ssid" > "$LOG_DIR/current_ssid"   # printf: an SSID of "-n" or "-e" is still a name
         rm -f "$LOG_DIR/net_identity"
         log_event "NETWORK changed to '$current_ssid'"
         notify normal "Network Changed" "Connected to: $current_ssid. Monitoring started."

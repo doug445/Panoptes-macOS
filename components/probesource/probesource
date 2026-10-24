@@ -1125,15 +1125,28 @@ sum_eta() {
 register_scan() {
     local pid="$1" ip="$2" log="$3" total_eta="$4"; shift 4
     {
-        echo "ip=$ip"
-        echo "log=$log"
-        echo "started=$(date +%s)"
-        echo "total_eta=$total_eta"
-        # IMPORTANT: quote — without quotes, "source" treats "planned=a b c" as
-        # a temp env assignment "planned=a" prefixed onto command "b c", so the
-        # variable ends up empty in the reader's scope.
-        printf 'planned=%q\n' "$*"
+        printf 'ip=%s\n' "$ip"
+        printf 'log=%s\n' "$log"
+        printf 'started=%s\n' "$(date +%s)"
+        printf 'total_eta=%s\n' "$total_eta"
+        printf 'planned=%s\n' "$*"
     } > "$STATE_DIR/$pid"
+}
+
+# Read a state file back as data. These files used to be `source`d, which runs
+# whatever they contain as this user; they live in a user-owned directory, so a
+# plain key=value parse costs nothing and removes the only code-execution path in
+# the tool that did not come from the user's own keyboard.
+read_state() {   # read_state FILE — sets ip log started total_eta planned in the caller
+    local key val
+    ip=""; log=""; started=""; total_eta=""; planned=""
+    while IFS='=' read -r key val; do
+        case "$key" in
+            ip|log|started|total_eta|planned) printf -v "$key" '%s' "$val" ;;
+        esac
+    done < "$1"
+    [[ "$started"   =~ ^[0-9]+$ ]] || started=0
+    [[ "$total_eta" =~ ^[0-9]+$ ]] || total_eta=1
 }
 
 cleanup_state() {
@@ -1151,9 +1164,7 @@ active_scans() {
     for f in "$STATE_DIR"/*; do
         [[ -f "$f" ]] || continue
         pid=$(basename "$f")
-        ip=""; log=""; started=""; total_eta=""; planned=""
-        # shellcheck disable=SC1090  # per-scan state file written by this script
-        source "$f"
+        read_state "$f"
         echo "$pid|$ip|$log|$started|$total_eta|$planned"
     done
 }
@@ -1161,8 +1172,7 @@ active_scans() {
 scan_progress() {
     local statefile="$1"
     local ip="" log="" started=0 total_eta=1 planned=""
-    # shellcheck disable=SC1090
-    source "$statefile"
+    read_state "$statefile"
     local now elapsed done_eta=0 id
     now=$(date +%s); elapsed=$(( now - started ))
     # Sum ETAs of completed tactics (END marker present).
@@ -1636,7 +1646,8 @@ keep_awake() { have caffeinate && caffeinate -isw "$BASHPID" >/dev/null 2>&1 & }
 # model is detach-and-come-back). No-op if osascript is unavailable.
 notify_done() {
     have osascript || return 0
-    osascript -e "display notification \"Scan of $1 finished — reopen probesource to review.\" with title \"probesource\" sound name \"Submarine\"" >/dev/null 2>&1 || true
+    osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "probesource" sound name "Submarine"' -e 'end run' \
+        -- "Scan of $1 finished — reopen probesource to review." >/dev/null 2>&1 || true
 }
 
 # End-of-scan epilogue: the done marker (to session + master logs) then notify.

@@ -82,7 +82,9 @@ Options: `--user NAME` (menu owner, default `$SUDO_USER` / console user),
 if killed, removes helper, sudoers, both LaunchDaemons, restores the plugin
 backups). Idempotent.
 
-Installs: `/usr/local/bin/warp-killswitch`, `/etc/sudoers.d/warp-killswitch`,
+Installs: `/Library/PrivilegedHelperTools/warp-killswitch` (with a convenience link at
+`/usr/local/bin/warp-killswitch`), `/etc/sudoers.d/warp-killswitch` (pinned to the menu's
+seven invocations — 4.1 security audit by Claude Fable 5.1),
 `/Library/LaunchDaemons/local.warp-killswitch.{watchdog,sleepwatcher}.plist`,
 the three on-demand `local.warp-killswitch.do-{down,up,heal}.plist` re-dispatch targets,
 both xbar plugin copies, copied from `components/menubar/security-toggle.5s.sh`

@@ -1,6 +1,10 @@
 # macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
-# macOS-SecureNetwork-Suite — xbar menu: AdGuard DNS toggle and DNS-cache flush
-# without a password prompt. Apple binaries only.
-@USER@ ALL=(root) NOPASSWD: /usr/sbin/networksetup -setdnsservers *, /usr/bin/killall -HUP mDNSResponder
+# macOS-SecureNetwork-Suite — xbar menu: AdGuard DNS toggle and DNS-cache flush without a
+# password prompt. Apple binaries only, and only the exact argument lists the menu uses
+# (components/menubar/security-toggle.5s.sh set_dns on "Wi-Fi" and "iPhone USB"): the
+# AdGuard list for Enable, the fallback list for Disable. A wildcard here would let any
+# process running as you repoint system DNS silently. install.sh fills the lists from
+# dns.conf — re-run `./install.sh --only sudoers` after changing it.
+@USER@ ALL=(root) NOPASSWD: /usr/sbin/networksetup -setdnsservers Wi-Fi @DNS_ON@, /usr/sbin/networksetup -setdnsservers Wi-Fi @DNS_OFF@, /usr/sbin/networksetup -setdnsservers iPhone\ USB @DNS_ON@, /usr/sbin/networksetup -setdnsservers iPhone\ USB @DNS_OFF@, /usr/bin/killall -HUP mDNSResponder
