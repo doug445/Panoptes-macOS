@@ -1,8 +1,8 @@
 #!/bin/bash
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
-# macOS-SecureNetwork-Suite — uninstall.sh
+# Panoptes-macOS — uninstall.sh
 #
 # Removes what install.sh put in place. Run as your normal user.
 #
@@ -37,14 +37,17 @@ launchctl bootout "gui/$(id -u)/com.netwatch" 2>/dev/null
 for b in netwatch nettop netcheck probesource; do /bin/rm -f "$HOME/.local/bin/$b"; done
 
 echo "== sudoers"
-sudo /bin/rm -f /etc/sudoers.d/securenet-dns /etc/sudoers.d/securenet-netcheck
+sudo /bin/rm -f /etc/sudoers.d/panoptes-dns /etc/sudoers.d/panoptes-netcheck \
+    /etc/sudoers.d/securenet-dns /etc/sudoers.d/securenet-netcheck   # securenet-*: pre-4.2 names
 
 echo "== zsh"
-if grep -qF '# >>> macOS-SecureNetwork-Suite >>>' "$HOME/.zshrc" 2>/dev/null; then
-    /bin/cp -p "$HOME/.zshrc" "$HOME/.zshrc.bak.$(date +%Y%m%d-%H%M%S)"
-    /usr/bin/sed -i '' '/# >>> macOS-SecureNetwork-Suite >>>/,/# <<< macOS-SecureNetwork-Suite <<</d' "$HOME/.zshrc"
-fi
-/bin/rm -rf "$HOME/.config/macos-securenetwork-suite"
+for name in Panoptes-macOS macOS-SecureNetwork-Suite; do   # the block carried the old name before 4.2
+    if grep -qF "# >>> $name >>>" "$HOME/.zshrc" 2>/dev/null; then
+        /bin/cp -p "$HOME/.zshrc" "$HOME/.zshrc.bak.$(date +%Y%m%d-%H%M%S)"
+        /usr/bin/sed -i '' "/# >>> $name >>>/,/# <<< $name <<</d" "$HOME/.zshrc"
+    fi
+done
+/bin/rm -rf "$HOME/.config/panoptes" "$HOME/.config/macos-securenetwork-suite"
 
 echo
 echo "Done. Left in place: DNS settings, firewall, WARP, Homebrew packages,"

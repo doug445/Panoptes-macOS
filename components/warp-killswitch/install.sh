@@ -1,9 +1,9 @@
 #!/bin/bash
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
 # warp-killswitch-macos install.sh — installer for the Cloudflare WARP
-# kill-switch, self-healer and watchdog on macOS. Part of macOS-SecureNetwork-Suite;
+# kill-switch, self-healer and watchdog on macOS. Part of Panoptes-macOS;
 # the suite's top-level install.sh runs this for you. The root helper is the file
 # ./warp-killswitch next to this script (installed verbatim); the xbar menu is copied
 # from ../menubar/security-toggle.5s.sh. Shared helpers come from ../../lib/common.sh.
@@ -237,7 +237,7 @@ fi
 # parser is the second line of defence; this rule is the first.
 TMP_SUDO=$(/usr/bin/mktemp)
 {
-    echo '# macOS-SecureNetwork-Suite — WARP kill-switch menu helper (components/warp-killswitch/install.sh).'
+    echo '# Panoptes-macOS — WARP kill-switch menu helper (components/warp-killswitch/install.sh).'
     echo '# Only the exact argument lists the menu uses are passwordless; regenerated on every install.'
     printf '%s ALL=(root) NOPASSWD: %s down, %s down --keep-dns, %s up, %s heal manual, %s status, %s state, %s verify\n' \
         "$TARGET_USER" "$HELPER" "$HELPER" "$HELPER" "$HELPER" "$HELPER" "$HELPER" "$HELPER"

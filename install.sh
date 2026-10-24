@@ -1,8 +1,8 @@
 #!/bin/bash
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
-# macOS-SecureNetwork-Suite — install.sh
+# Panoptes-macOS — install.sh
 #
 # One installer for the whole stack: dependencies (Homebrew, Cloudflare WARP,
 # xbar, ProtonVPN, CLI tools, probesource's probe toolset), then every
@@ -23,7 +23,7 @@
 #   Apple Silicon is the primary platform: Homebrew, every component, unchanged.
 #   Intel Macs — including OpenCore Legacy Patcher (OCLP) Macs — are supported in a
 #   degraded mode: MacPorts exclusively (any installed Homebrew is ignored, since the
-#   two coexist; SECURENET_PKG=homebrew forces the deprecated Homebrew-Intel path), and
+#   two coexist; PANOPTES_PKG=homebrew forces the deprecated Homebrew-Intel path), and
 #   on macOS older than 14 the current Cloudflare WARP and ProtonVPN releases cannot
 #   install, so the tunnel components are skipped while DNS, firewall, monitoring and
 #   the menu still work.
@@ -53,8 +53,8 @@ export LC_ALL=C
 # bash on most Macs, and on macOS 27 everything forked from a non-Apple binary sees an
 # empty ARP table — netfix's detect.sh would then measure a tainted baseline and the
 # killswitch self-test would be blind. Re-exec once; the guard variable stops a loop.
-if [ "${BASH:-}" != /bin/bash ] && [ -z "${SECURENET_REEXEC:-}" ] && [ -x /bin/bash ]; then
-    SECURENET_REEXEC=1 exec /bin/bash "$0" "$@"
+if [ "${BASH:-}" != /bin/bash ] && [ -z "${PANOPTES_REEXEC:-}" ] && [ -x /bin/bash ]; then
+    PANOPTES_REEXEC=1 exec /bin/bash "$0" "$@"
 fi
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
@@ -71,7 +71,29 @@ DOH_URL="https://dns.adguard-dns.com/dns-query"   # DoH target for Chromium (pol
 DOH_BOOTSTRAP="94.140.14.14"                       # its IP, for Firefox bootstrap
 # per-machine overrides, also read by the menu-bar plugin, e.g. FALLBACK2=1.1.1.1 (unfiltered) or an
 # AdGuard DNS account resolver: DOH_URL=https://d.adguard-dns.com/dns-query/<device-id> DOH_BOOTSTRAP=94.140.14.49
-DNS_CONF="$HOME/.config/macos-securenetwork-suite/dns.conf"
+# ---- 4.2 rename: macOS-SecureNetwork-Suite became Panoptes-macOS -----------------
+# Per-user paths moved with the name. Carry an existing install across once, before
+# anything below reads dns.conf. The sudoers component replaces the old rule files.
+for pair in .config/macos-securenetwork-suite:.config/panoptes .local/state/macos-securenetwork-suite:.local/state/panoptes; do
+    old="$HOME/${pair%%:*}"; new="$HOME/${pair##*:}"
+    if [ -d "$old" ] && [ ! -e "$new" ]; then
+        mkdir -p "$(dirname "$new")" && mv "$old" "$new" && ylw "4.2 rename: moved $old -> $new"
+    fi
+done
+if grep -qF '# >>> macOS-SecureNetwork-Suite >>>' "$HOME/.zshrc" 2>/dev/null; then
+    /bin/cp -p "$HOME/.zshrc" "$HOME/.zshrc.bak.$(date +%Y%m%d-%H%M%S)"
+    /usr/bin/sed -i '' '/# >>> macOS-SecureNetwork-Suite >>>/,/# <<< macOS-SecureNetwork-Suite <<</{s/macos-securenetwork-suite/panoptes/g;s/macOS-SecureNetwork-Suite/Panoptes-macOS/g;}' "$HOME/.zshrc"
+    ylw "4.2 rename: ~/.zshrc source block renamed (backup kept)"
+fi
+for uj in "$HOME/Library/Application Support/Firefox/Profiles"/*/user.js; do
+    if [ -f "$uj" ] && grep -qF '// >>> macOS-SecureNetwork-Suite >>>' "$uj"; then
+        /usr/bin/sed -i '' -e 's|// >>> macOS-SecureNetwork-Suite >>>|// >>> Panoptes-macOS >>>|' \
+                           -e 's|// <<< macOS-SecureNetwork-Suite <<<|// <<< Panoptes-macOS <<<|' "$uj"
+        ylw "4.2 rename: Firefox $(basename "$(dirname "$uj")")/user.js block renamed"
+    fi
+done
+
+DNS_CONF="$HOME/.config/panoptes/dns.conf"
 # shellcheck source=/dev/null
 [ -f "$DNS_CONF" ] && . "$DNS_CONF"
 FALLBACK_DNS="$FALLBACK1 $FALLBACK2"
@@ -98,7 +120,7 @@ FORMULAE="bash nmap arp-scan watch speedtest"
 # without Homebrew they come from the vendor, signature-checked against the Team ID.
 APPS="Cloudflare WARP|xbar|ProtonVPN"
 
-SHELL_DIR="$HOME/.config/macos-securenetwork-suite"
+SHELL_DIR="$HOME/.config/panoptes"
 BIN="$HOME/.local/bin"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -146,7 +168,7 @@ want() {
 [ "$(id -u)" -ne 0 ] || die "run as your normal user, not root (it asks for sudo when needed)."
 pkg_detect || die "package-manager detection failed."
 TIER=full; [ "$ARCH" = arm64 ] || TIER=degraded
-hdr "macOS-SecureNetwork-Suite"
+hdr "Panoptes-macOS"
 echo "  macOS $OS_VER ($ARCH), user $USER, packages: $PKG_MGR ($PKG_PREFIX)"
 if [ "$TIER" = degraded ]; then
     ylw "  Intel Mac$(is_oclp && echo ' running OpenCore Legacy Patcher'): supported in degraded mode (see install.sh header)."
@@ -161,7 +183,7 @@ echo "  components: $(for c in $ALL; do want "$c" && printf '%s ' "$c"; done)"
 # change is the same `git pull && ./install.sh` as any update: the installer notices,
 # says so, re-runs every layout-dependent component even under --only, and audits the
 # result for paths left over from the old layout.
-LAYOUT_STATE="$HOME/.local/state/macos-securenetwork-suite/layout"
+LAYOUT_STATE="$HOME/.local/state/panoptes/layout"
 LAYOUT="$ARCH $PKG_MGR $PKG_PREFIX"
 PREV_LAYOUT=$(cat "$LAYOUT_STATE" 2>/dev/null || true)
 LAYOUT_COMPS="sudoers killswitch netwatch netcheck probesource"
@@ -303,12 +325,12 @@ if want sudoers; then
     # those argument lists verbatim, so no other process running as you can repoint
     # system DNS without a password. Editing dns.conf changes the lists: re-run this component.
     DNS_ON="$ADGUARD_DNS $FALLBACK_DNS"; DNS_OFF="$FALLBACK_DNS"
-    for name in securenet-dns securenet-netcheck; do
+    for name in panoptes-dns panoptes-netcheck; do
         tmp=$(mktemp)
         sed -e "s|@USER@|$USER|g" -e "s|@DNS_ON@|$DNS_ON|g" -e "s|@DNS_OFF@|$DNS_OFF|g" "$C/sudoers/$name.in" > "$tmp"
         # arp-scan: only with a root-owned binary in a root-owned prefix (MacPorts), and only
         # the exact invocations netcheck/nettop use — never free arguments (-W writes files).
-        if [ "$name" = securenet-netcheck ] && ARPSCAN=$(pkg_bin arp-scan) && [ -n "$ARPSCAN" ] && pkg_root_owned "$ARPSCAN"; then
+        if [ "$name" = panoptes-netcheck ] && ARPSCAN=$(pkg_bin arp-scan) && [ -n "$ARPSCAN" ] && pkg_root_owned "$ARPSCAN"; then
             printf '%s ALL=(root) NOPASSWD: %s --interface=en[0-9] --localnet --ignoredups, %s --interface=en[1-9][0-9] --localnet --ignoredups, %s --localnet --ignoredups\n' \
                 "$USER" "$ARPSCAN" "$ARPSCAN" "$ARPSCAN" >> "$tmp"
             grn "  arp-scan is root-owned ($ARPSCAN) — pinned NOPASSWD rule added"
@@ -321,10 +343,16 @@ if want sudoers; then
         fi
         rm -f "$tmp"
     done
+    # 4.2 rename: the same rules were installed as securenet-* before; drop those copies.
+    for old in securenet-dns securenet-netcheck; do
+        if sudo /bin/test -f "/etc/sudoers.d/$old"; then
+            sudo /bin/rm -f "/etc/sudoers.d/$old" && grn "  removed pre-4.2 /etc/sudoers.d/$old"
+        fi
+    done
     # Every other passwordless grant for this login is worth a look: rules left by earlier
     # tooling (pre-suite names like swiftbar-dns or netcheck) are often broader than ours.
     others=$(sudo sh -c "grep -lsE '^${USER}[[:space:]].*NOPASSWD' /etc/sudoers.d/* 2>/dev/null" \
-             | grep -vE '/(securenet-dns|securenet-netcheck|warp-killswitch)$' || true)
+             | grep -vE '/(panoptes-dns|panoptes-netcheck|warp-killswitch)$' || true)
     if [ -n "$others" ]; then
         ylw "  other NOPASSWD rules for $USER exist — review them (sudo cat FILE; sudo rm FILE to drop):"
         printf '%s\n' "$others" | sed 's/^/    /'
@@ -415,7 +443,7 @@ if want shell; then
     hdr "zsh: checkdns + network aliases"
     put "$C/checkdns/checkdns.zsh"        "$SHELL_DIR/checkdns.zsh" 644
     put "$C/checkdns/network-aliases.zsh" "$SHELL_DIR/network-aliases.zsh" 644
-    MARK="# >>> macOS-SecureNetwork-Suite >>>"
+    MARK="# >>> Panoptes-macOS >>>"
     if grep -qF "$MARK" "$HOME/.zshrc" 2>/dev/null; then
         grn "  ~/.zshrc already sources the suite"
     elif grep -q '^checkdns()' "$HOME/.zshrc" 2>/dev/null; then
@@ -426,7 +454,7 @@ if want shell; then
             echo ""
             echo "$MARK"
             echo "for _f in \"$SHELL_DIR\"/*.zsh(N); do source \"\$_f\"; done; unset _f"
-            echo "# <<< macOS-SecureNetwork-Suite <<<"
+            echo "# <<< Panoptes-macOS <<<"
         } >> "$HOME/.zshrc"
         grn "  added source block to ~/.zshrc (open a new shell)"
     fi
@@ -464,7 +492,7 @@ if want profiles; then
         return 1
     }
     # both profiles are templates (login name, DoH target) rendered next to the shell files
-    render_dir="$HOME/.config/macos-securenetwork-suite"; mkdir -p "$render_dir"
+    render_dir="$HOME/.config/panoptes"; mkdir -p "$render_dir"
     for p in AdGuard-DoH chrome-doh-policy; do
         f="$render_dir/$p.mobileconfig"
         render "$C/profiles/$p.mobileconfig.in" > "$f"
@@ -495,7 +523,7 @@ if want firefox; then
     if [ ! -d "$FF" ]; then
         ylw "  no Firefox profiles — skipped"
     else
-        FMARK="// >>> macOS-SecureNetwork-Suite >>>"; FEND="// <<< macOS-SecureNetwork-Suite <<<"
+        FMARK="// >>> Panoptes-macOS >>>"; FEND="// <<< Panoptes-macOS <<<"
         ff_tmp=$(mktemp -d); render "$C/firefox/user.js.in" > "$ff_tmp/block"
         for prof in "$FF"/*/; do
             uj="${prof}user.js"
@@ -542,7 +570,7 @@ for f in "$BIN/netwatch" "$BIN/nettop" "$BIN/netcheck" "$BIN/probesource" \
     fi
     [ -n "$bad" ] && stale="$stale\n    $f: $bad"
 done
-if sudo grep -qE "$foreign" /etc/sudoers.d/securenet-netcheck 2>/dev/null; then stale="$stale\n    /etc/sudoers.d/securenet-netcheck"; fi
+if sudo grep -qE "$foreign" /etc/sudoers.d/panoptes-netcheck 2>/dev/null; then stale="$stale\n    /etc/sudoers.d/panoptes-netcheck"; fi
 # Since 4.1 the helper lives only in /Library/PrivilegedHelperTools; /usr/local/bin holds a
 # link. A regular file there is a pre-4.1 helper copy the killswitch component would have replaced.
 if [ -f /usr/local/bin/warp-killswitch ] && [ ! -L /usr/local/bin/warp-killswitch ]; then
@@ -562,7 +590,7 @@ if [ -n "$FAILED" ]; then
     red "Finished with problems:"; printf '%b\n' "$FAILED"; exit 1
 fi
 mkdir -p "$(dirname "$LAYOUT_STATE")" && printf '%s\n' "$LAYOUT" > "$LAYOUT_STATE"
-grn "macOS-SecureNetwork-Suite installed ($TIER mode, $PKG_MGR)."
+grn "Panoptes-macOS installed ($TIER mode, $PKG_MGR)."
 [ "$TIER" = degraded ] && ylw "  Degraded mode: run netcheck — its PLATFORM INTEGRITY section shows what this Mac lacks."
 echo "  Menu bar: xbar › Security Toggle     CLI: netcheck · checkdns · nettop · probesource"
 echo "  Objective-See: LuLu (outbound alerts) · BlockBlock (persistence alerts) · KnockKnock (scan on demand)"

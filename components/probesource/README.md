@@ -48,7 +48,7 @@ probesource       # launch the TUI
     archives first, source build as a fallback; `port` runs via sudo because the
     prefix is root-owned), otherwise **Homebrew** under `/usr/local` (works, but
     Homebrew no longer ships x86_64 bottles, so everything compiles).
-    `SECURENET_PKG=macports` or `SECURENET_PKG=homebrew` forces the choice on
+    `PANOPTES_PKG=macports` or `PANOPTES_PKG=homebrew` forces the choice on
     Intel; it is ignored on Apple Silicon. `install.sh` offers to install the
     chosen manager if it is missing (MacPorts from its signed installer).
 - **bash >= 4** — macOS ships bash 3.2, which `probesource` needs to exceed, so

@@ -1,5 +1,5 @@
 #!/opt/homebrew/bin/bash
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
 # nettop (macOS) — summarize netwatch DROP log by top source IPs
@@ -11,7 +11,7 @@ LOG=~/.local/share/netwatch/events.log
 # A process forked by a non-Apple-signed binary (Homebrew bash) gets an EMPTY
 # ARP table. Read direct first so this still works when run by hand from zsh
 # and on unaffected machines; fall back to the cache published by the
-# com.netwatch.arpcache LaunchAgent. See components/macos27-netfix in macOS-SecureNetwork-Suite.
+# com.netwatch.arpcache LaunchAgent. See components/macos27-netfix in Panoptes-macOS.
 ARP_CACHE="${HOME}/.local/share/netwatch/arp.cache"
 ARP_CACHE_MAX_AGE=120
 arp_stale_warned=0

@@ -1,7 +1,7 @@
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
-# macOS-SecureNetwork-Suite — netcheck: read installed configuration profiles.
+# Panoptes-macOS — netcheck: read installed configuration profiles.
 # arp-scan is NOT here by default: with free arguments it can write files as root
 # (-W), and in a Homebrew prefix the binary itself is user-replaceable — either is a
 # root escalation, so netcheck/nettop simply prompt for it. install.sh appends a rule

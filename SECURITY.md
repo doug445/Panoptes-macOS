@@ -114,7 +114,7 @@ fixes; both run as you, never as root.
 ## Verifying your own install
 
 ```sh
-sudo cat /etc/sudoers.d/securenet-dns /etc/sudoers.d/warp-killswitch   # no '*' anywhere
+sudo cat /etc/sudoers.d/panoptes-dns /etc/sudoers.d/warp-killswitch   # no '*' anywhere
 ls -l /Library/PrivilegedHelperTools/warp-killswitch /usr/local/bin/warp-killswitch   # file + link
 sudo warp-killswitch status | grep -E 'helper|watchdog'
 sudo -l | grep -E 'networksetup|warp-killswitch'                      # what sudo thinks you may run

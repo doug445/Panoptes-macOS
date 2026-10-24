@@ -1,7 +1,7 @@
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
-# macOS-SecureNetwork-Suite — xbar menu: AdGuard DNS toggle and DNS-cache flush without a
+# Panoptes-macOS — xbar menu: AdGuard DNS toggle and DNS-cache flush without a
 # password prompt. Apple binaries only, and only the exact argument lists the menu uses
 # (components/menubar/security-toggle.5s.sh set_dns on "Wi-Fi" and "iPhone USB"): the
 # AdGuard list for Enable, the fallback list for Disable. A wildcard here would let any

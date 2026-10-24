@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
 
@@ -7,7 +7,7 @@
 # A process forked by a non-Apple-signed binary (Homebrew bash) gets an EMPTY
 # ARP table. Read direct first so this still works when run by hand from zsh
 # and on unaffected machines; fall back to the cache published by the
-# com.netwatch.arpcache LaunchAgent. See components/macos27-netfix in macOS-SecureNetwork-Suite.
+# com.netwatch.arpcache LaunchAgent. See components/macos27-netfix in Panoptes-macOS.
 ARP_CACHE="${HOME}/.local/share/netwatch/arp.cache"
 ARP_CACHE_MAX_AGE=120
 arp_stale_warned=0
@@ -82,7 +82,7 @@ arp_mac_for_ip() {
 #     netstat/log show/pfctl`. Captures target the primary interface, not `any`.
 #   * Package manager: Homebrew on Apple Silicon (always; never run as root). On
 #     Intel / OpenCore Legacy Patcher Macs, MacPorts (/opt/local, installs via
-#     sudo) when present, else Homebrew at /usr/local; SECURENET_PKG=macports|
+#     sudo) when present, else Homebrew at /usr/local; PANOPTES_PKG=macports|
 #     homebrew forces the choice there. Some tools (nbtscan, onesixtyone, hping3)
 #     have no brew formula and are gated/skipped cleanly.
 #
@@ -196,7 +196,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # through `brew` directly (no sudo), unlike the privileged runtime tactics which
 # use `sudo -n`. Intel / OCLP: MacPorts when /opt/local/bin/port exists (its
 # prefix is root-owned, so `port install` runs under sudo), else Homebrew at
-# /usr/local; SECURENET_PKG=macports|homebrew overrides (same rule as the
+# /usr/local; PANOPTES_PKG=macports|homebrew overrides (same rule as the
 # suite's lib/pkg.sh, which this standalone script cannot source).
 PM=none
 PM_NAME=Homebrew
@@ -206,7 +206,8 @@ detect_pm() {
         have brew && PM=brew || PM=none
         return 0
     fi
-    case "${SECURENET_PKG:-}" in
+    # SECURENET_PKG is the pre-4.2 name of PANOPTES_PKG and still works
+    case "${PANOPTES_PKG:-${SECURENET_PKG:-}}" in
         macports) [[ -x /opt/local/bin/port ]] && PM=port ;;
         homebrew) have brew && PM=brew ;;
         *)  if [[ -x /opt/local/bin/port ]]; then PM=port

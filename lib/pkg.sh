@@ -1,5 +1,5 @@
 #!/bin/bash
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
 #
@@ -8,7 +8,7 @@
 #
 # POLICY: Apple Silicon is the primary platform and is never downgraded — it always uses
 # Homebrew exactly as before this layer existed, whatever else is installed, and
-# SECURENET_PKG is ignored there. Intel Macs (including OpenCore Legacy Patcher Macs)
+# PANOPTES_PKG is ignored there. Intel Macs (including OpenCore Legacy Patcher Macs)
 # are supported in a degraded mode:
 #   * MacPorts (/opt/local) — root-owned prefix, prebuilt archives for every macOS from
 #     10.6 to 27. Preferred on Intel: Homebrew stopped building x86_64 bottles in
@@ -16,12 +16,12 @@
 #   * Homebrew (/usr/local) — DEPRECATED on Intel and no longer auto-selected. Intel is
 #     MacPorts-exclusive: because the two coexist (/opt/local vs /usr/local), the suite
 #     uses MacPorts and ignores any Homebrew present. Homebrew-Intel is reachable only
-#     via the explicit SECURENET_PKG=homebrew override, which pkg_detect() warns about
+#     via the explicit PANOPTES_PKG=homebrew override, which pkg_detect() warns about
 #     once. Rationale: Homebrew moved Intel to Tier 3 in Sept 2026 (no new x86_64
 #     bottles) and ends Intel support entirely around Sept 2027; the override is removed
 #     then, leaving a clean split (arm64 → Homebrew, Intel → MacPorts).
 #     Apple Silicon Homebrew is unaffected and is NOT deprecated.
-#   On Intel, SECURENET_PKG=macports (default) or homebrew (deprecated) forces the choice.
+#   On Intel, PANOPTES_PKG=macports (default) or homebrew (deprecated) forces the choice.
 #
 # Interface (all set/defined after pkg_detect):
 #   PKG_MGR        macports | homebrew
@@ -75,12 +75,13 @@ pkg_detect() {
         # coexist, so the suite simply uses MacPorts here and IGNORES any Homebrew that
         # is installed — Homebrew-Intel is Tier 3 / source-only and EOL ~Sept 2027, and
         # bootstrapping MacPorts alongside an existing Homebrew disturbs nothing.
-        # SECURENET_PKG=homebrew is still honoured as an explicit, deprecated override
+        # PANOPTES_PKG=homebrew is still honoured as an explicit, deprecated override
         # (pkg_detect then warns once); macports or unset both select MacPorts.
-        case "${SECURENET_PKG:-}" in
+        # SECURENET_PKG is the pre-4.2 name of PANOPTES_PKG and still works
+        case "${PANOPTES_PKG:-${SECURENET_PKG:-}}" in
             homebrew)    PKG_MGR=homebrew ;;
             macports|"") PKG_MGR=macports ;;
-            *) red "SECURENET_PKG must be macports or homebrew"; return 1 ;;
+            *) red "PANOPTES_PKG must be macports or homebrew"; return 1 ;;
         esac
         if [ "$PKG_MGR" = macports ]; then PKG_PREFIX=/opt/local; else PKG_PREFIX=/usr/local; fi
     fi
@@ -102,12 +103,12 @@ pkg_warn_intel_homebrew() {
     [ -n "${_PKG_INTEL_BREW_WARNED:-}" ] && return 0
     _PKG_INTEL_BREW_WARNED=1
     ylw "  ── DEPRECATED: Homebrew on Intel (x86_64) ──────────────────"
-    ylw "  You set SECURENET_PKG=homebrew. This suite uses MacPorts on Intel"
+    ylw "  You set PANOPTES_PKG=homebrew. This suite uses MacPorts on Intel"
     ylw "  by default and treats Homebrew-Intel as deprecated: Homebrew moved"
     ylw "  Intel to Tier 3 in Sept 2026 (no x86_64 bottles — everything builds"
     ylw "  from source) and ends Intel support entirely around Sept 2027,"
     ylw "  after which this override is removed."
-    ylw "  Supported path: unset SECURENET_PKG (or set it to macports). MacPorts"
+    ylw "  Supported path: unset PANOPTES_PKG (or set it to macports). MacPorts"
     ylw "  coexists with your Homebrew and is bootstrapped from its signed"
     ylw "  release if absent."
     ylw "  (Apple Silicon Homebrew is unaffected by this notice.)"

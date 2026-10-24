@@ -1,5 +1,5 @@
 #!/opt/homebrew/bin/bash
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
 # netwatch (macOS) — monitor Application Firewall blocks, send native notifications
@@ -114,7 +114,7 @@ get_gateway_ip() {
 # /opt/homebrew/bin/bash) gets an EMPTY ARP table. Read direct first — correct
 # when run by hand from zsh, and on unaffected machines — then fall back to the
 # cache published by the com.netwatch.arpcache LaunchAgent.
-# See components/macos27-netfix in macOS-SecureNetwork-Suite.
+# See components/macos27-netfix in Panoptes-macOS.
 arp_table() {
     local direct now mtime age last mark="${LOG_DIR}/arp_stale_notified"
     direct=$(arp -an 2>/dev/null || true)

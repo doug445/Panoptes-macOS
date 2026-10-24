@@ -1,16 +1,16 @@
 #!/bin/bash
 # <xbar.title>Security Toggle</xbar.title>
-# <xbar.version>3.2</xbar.version>
+# <xbar.version>3.3</xbar.version>
 # <xbar.author>William MacKinnon</xbar.author>
 # <xbar.desc>WARP, AdGuard DNS and ProtonVPN toggles + WARP kill-switch / heal / status</xbar.desc>
-# <xbar.abouturl>https://github.com/doug445/macOS-SecureNetwork-Suite</xbar.abouturl>
+# <xbar.abouturl>https://github.com/doug445/Panoptes-macOS</xbar.abouturl>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 # <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
 # <swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
 # security-toggle v3 (warp-killswitch)
 #
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
 #
@@ -49,19 +49,19 @@ WARP_CLI="/usr/local/bin/warp-cli"
 # exact path with the exact argument lists used below; /usr/local/bin only holds a link.
 KILLSWITCH="/Library/PrivilegedHelperTools/warp-killswitch"
 KILL_MARKER="/var/db/warp-killswitch/killed"
-STATE_DIR="$HOME/.local/state/macos-securenetwork-suite"
+STATE_DIR="$HOME/.local/state/panoptes"
 PARK_MARKER="$STATE_DIR/warp-parked-for-protonvpn"   # WARP was parked BY the menu for ProtonVPN
 AX_MARKER="$STATE_DIR/accessibility-missing"          # last ProtonVPN click failed for lack of Accessibility
 PROTON_APP="ProtonVPN"                                # app bundle name and System Events process name
 # ProtonVPN's VPN service ID differs per install, and the service is only
 # registered while the app is running — look it up rather than hardcoding it.
-PROTON_ID="${SECURENET_PROTON_ID:-$(/usr/sbin/scutil --nc list 2>/dev/null | /usr/bin/grep -i proton | /usr/bin/grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | /usr/bin/head -1)}"
+PROTON_ID="${PANOPTES_PROTON_ID:-${SECURENET_PROTON_ID:-$(/usr/sbin/scutil --nc list 2>/dev/null | /usr/bin/grep -i proton | /usr/bin/grep -oE '[0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12}' | /usr/bin/head -1)}}"   # SECURENET_PROTON_ID: pre-4.2 name
 ADGUARD_PRIMARY="94.140.14.140"
 ADGUARD_SECONDARY="94.140.14.141"
 FALLBACK1="9.9.9.9"
 FALLBACK2="1.1.1.2"   # Cloudflare malware-blocking; must match install.sh
 # per-machine overrides, shared with install.sh (e.g. FALLBACK2=1.1.1.1 for unfiltered)
-DNS_CONF="$HOME/.config/macos-securenetwork-suite/dns.conf"
+DNS_CONF="$HOME/.config/panoptes/dns.conf"
 # shellcheck source=/dev/null
 [ -f "$DNS_CONF" ] && . "$DNS_CONF"
 DNS_SERVICES=("Wi-Fi" "iPhone USB")                   # the services the AdGuard toggle manages
@@ -83,7 +83,7 @@ flush_dns() { /usr/bin/dscacheutil -flushcache >/dev/null 2>&1; /usr/bin/sudo -n
 note() { /usr/bin/osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' -- "$1" "$2" >/dev/null 2>&1; }
 refresh_menu() { /usr/bin/open -g "xbar://app/refreshPlugin?path=$(basename "$0")" >/dev/null 2>&1; }
 set_dns() {   # set_dns SERVER... — on every managed service
-  # /etc/sudoers.d/securenet-dns allows exactly these two server lists on exactly these
+  # /etc/sudoers.d/panoptes-dns allows exactly these two server lists on exactly these
   # services; change the lists in dns.conf and re-run `./install.sh --only sudoers`.
   local svc
   for svc in "${DNS_SERVICES[@]}"; do

@@ -1,6 +1,17 @@
-# macOS-SecureNetwork-Suite — private DNS, a WARP kill-switch and network intrusion detection for macOS
+<p align="center">
+  <img alt="Panoptes-macOS — macOS Secure Network"
+       src="docs/brand/panoptes-macos-logo-dark.svg" width="480">
+</p>
 
-[![lint](https://github.com/doug445/macOS-SecureNetwork-Suite/actions/workflows/lint.yml/badge.svg)](https://github.com/doug445/macOS-SecureNetwork-Suite/actions/workflows/lint.yml)
+# Panoptes-macOS
+
+**macOS Secure Network**
+
+Private DNS, a WARP kill-switch and network intrusion detection for macOS.
+Formerly *macOS-SecureNetwork-Suite* (until 4.1); the old repository address
+redirects here.
+
+[![lint](https://github.com/doug445/Panoptes-macOS/actions/workflows/lint.yml/badge.svg)](https://github.com/doug445/Panoptes-macOS/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Free and open source](https://img.shields.io/badge/Free%20and%20open%20source-brightgreen.svg)](LICENSE)
 [![Platform: Apple Silicon macOS 14–27 | Intel and OCLP macOS 11–26.x](https://img.shields.io/badge/platform-Apple%20Silicon%2014%E2%80%9327%20%7C%20Intel%20%2B%20OCLP%2011%E2%80%9326.x-lightgrey.svg)](#requirements)
@@ -21,9 +32,20 @@ macOS 11 and later, get a reduced but supported set
 ([details](#intel-and-opencore-legacy-patcher-macs)). This is a a comprehensive 
 Endpoint Detection and Response (EDR) hardening framework for macOS.
 
-It is the macOS counterpart of [Panoptes](https://github.com/doug445/Panoptes),
-the Linux suite — same ideas, rebuilt on `networksetup`, `scutil`, `pf`, launchd
-and the unified log instead of systemd-resolved, NetworkManager and nftables.
+## Why Panoptes
+
+Argus Panoptes, "the all-seeing", was the giant of Greek myth with a hundred
+eyes. Hera set him to guard Io, whom Zeus had hidden as a heifer, because he
+never slept: while some of his eyes rested, the rest kept watch, so nothing
+crossed the ground he guarded unseen. It took Hermes a whole night of stories
+and flute-playing to close every eye at once before he could kill him, and
+Hera set the hundred eyes in her peacock's tail so they would never be lost.
+That is the job this suite does for a Mac: eyes on the resolver, the tunnel,
+the ARP table and the firewall log at the same time, and no moment when all of
+them are closed. The Linux suite [Panoptes](https://github.com/doug445/Panoptes)
+came first; Panoptes-macOS is the same watchman rebuilt on `networksetup`,
+`scutil`, `pf`, launchd and the unified log instead of systemd-resolved,
+NetworkManager and nftables.
 
 > [!WARNING]
 > ## Homebrew has dropped Intel Macs — this suite uses MacPorts there
@@ -49,7 +71,7 @@ and the unified log instead of systemd-resolved, NetworkManager and nftables.
 > with Homebrew if you have both. On Intel the suite uses **MacPorts
 > exclusively** and ignores any Homebrew that is installed — because the two
 > coexist, it bootstraps MacPorts alongside your Homebrew without disturbing it.
-> (`SECURENET_PKG=homebrew` still forces the old Homebrew-Intel path, but it is
+> (`PANOPTES_PKG=homebrew` (or its pre-4.2 name `SECURENET_PKG`) still forces the old Homebrew-Intel path, but it is
 > deprecated and warns; see
 > [migrating an Intel Mac off Homebrew](#migrating-an-intel-mac-off-homebrew).)
 >
@@ -61,10 +83,10 @@ exercised on Intel under macOS 26 with MacPorts. Nothing in it is tied to one
 machine: the package manager and its prefix, the Wi-Fi interface, the ProtonVPN
 service ID and the user are all read at run time.
 
-**Guides:** [WARP connected but no internet](https://doug445.github.io/macOS-SecureNetwork-Suite/cloudflare-warp-connected-no-internet-mac/) ·
-[Chrome ECH not working on macOS](https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/) ·
-[macOS 27: `arp -an` is empty](https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/) ·
-[Homebrew dropped Intel Macs: moving to MacPorts](https://doug445.github.io/macOS-SecureNetwork-Suite/homebrew-intel-mac-macports/)
+**Guides:** [WARP connected but no internet](https://doug445.github.io/Panoptes-macOS/cloudflare-warp-connected-no-internet-mac/) ·
+[Chrome ECH not working on macOS](https://doug445.github.io/Panoptes-macOS/chrome-ech-not-working-macos/) ·
+[macOS 27: `arp -an` is empty](https://doug445.github.io/Panoptes-macOS/macos-27-arp-table-empty/) ·
+[Homebrew dropped Intel Macs: moving to MacPorts](https://doug445.github.io/Panoptes-macOS/homebrew-intel-mac-macports/)
 
 ---
 
@@ -124,8 +146,8 @@ Verify any of it at [tls-ech.dev](https://tls-ech.dev) or [defo.ie/ech-check.php
 ## Quick start
 
 ```sh
-git clone https://github.com/doug445/macOS-SecureNetwork-Suite.git
-cd macOS-SecureNetwork-Suite
+git clone https://github.com/doug445/Panoptes-macOS.git
+cd Panoptes-macOS
 ./install.sh            # as your normal user — it asks for sudo once
 ```
 
@@ -269,7 +291,7 @@ installed by the suite from its signed release (Developer ID `QTA3A3B7F3`) if
 missing. The suite uses MacPorts on Intel **exclusively** and ignores any
 Homebrew that is installed; since the two coexist (`/opt/local` vs
 `/usr/local`), it bootstraps MacPorts without touching your Homebrew.
-`SECURENET_PKG=homebrew ./install.sh` still forces the old Homebrew-Intel path,
+`PANOPTES_PKG=homebrew ./install.sh` (or its pre-4.2 name `SECURENET_PKG`) still forces the old Homebrew-Intel path,
 but that override is **deprecated** (it warns) and will be removed when Homebrew
 ends Intel support (~Sept 2027). Apple Silicon is unaffected.
 
@@ -481,15 +503,15 @@ resolver, not software. Only WARP and ProtonVPN run local daemons.
 |---|---|
 | `/Library/PrivilegedHelperTools/warp-killswitch` (root helper; `/usr/local/bin/warp-killswitch` is a convenience link that sudoers and launchd never reference) | killswitch |
 | `/Library/LaunchDaemons/local.warp-killswitch.{watchdog,do-down,do-up,do-heal}.plist` | killswitch |
-| `/etc/sudoers.d/warp-killswitch`, `securenet-dns`, `securenet-netcheck` | killswitch, sudoers |
+| `/etc/sudoers.d/warp-killswitch`, `panoptes-dns`, `panoptes-netcheck` | killswitch, sudoers |
 | `~/Library/Application Support/xbar/plugins/security-toggle.5s.sh` (+ reference copy in `~/Documents/SwiftBar/`) | killswitch, from `components/menubar/` |
 | `~/Library/LaunchAgents/com.netwatch.plist`, `com.netwatch.arpcache.plist` | netwatch, netfix |
 | `~/.local/bin/{netwatch,nettop,netcheck,probesource,arp-cache-dump}` | netwatch, netcheck, probesource, netfix |
-| `~/.config/macos-securenetwork-suite/*.zsh` + a marked block in `~/.zshrc` | shell |
+| `~/.config/panoptes/*.zsh` + a marked block in `~/.zshrc` | shell |
 | `/Applications/{LuLu,KnockKnock}.app`, `/Library/Objective-See/BlockBlock/` + its daemon `com.objective-see.blockblock`, LuLu's network extension | objective-see |
-| `~/.config/macos-securenetwork-suite/AdGuard-DoH.mobileconfig`, `chrome-doh-policy.mobileconfig` (rendered from the templates with your login name and DoH target) | profiles |
-| `~/.config/macos-securenetwork-suite/dns.conf` — optional per-machine overrides, read by the installer and the menu. `FALLBACK2=1.1.1.1` swaps the second fallback for Cloudflare's unfiltered resolver (the default is the malware-blocking `1.1.1.2`); `DOH_URL=https://d.adguard-dns.com/dns-query/<device-id>` plus `DOH_BOOTSTRAP=94.140.14.49` point the Chromium policy and Firefox at an AdGuard DNS account resolver instead of the public one. The DNS sudoers rule is rendered from these values, so after editing run `./install.sh --only sudoers` | you |
-| State / logs: `/var/db/warp-killswitch/`, `/var/log/warp-*.log`, `~/.local/share/{netwatch,probesource}/`, `~/.local/state/macos-securenetwork-suite/` | |
+| `~/.config/panoptes/AdGuard-DoH.mobileconfig`, `chrome-doh-policy.mobileconfig` (rendered from the templates with your login name and DoH target) | profiles |
+| `~/.config/panoptes/dns.conf` — optional per-machine overrides, read by the installer and the menu. `FALLBACK2=1.1.1.1` swaps the second fallback for Cloudflare's unfiltered resolver (the default is the malware-blocking `1.1.1.2`); `DOH_URL=https://d.adguard-dns.com/dns-query/<device-id>` plus `DOH_BOOTSTRAP=94.140.14.49` point the Chromium policy and Firefox at an AdGuard DNS account resolver instead of the public one. The DNS sudoers rule is rendered from these values, so after editing run `./install.sh --only sudoers` | you |
+| State / logs: `/var/db/warp-killswitch/`, `/var/log/warp-*.log`, `~/.local/share/{netwatch,probesource}/`, `~/.local/state/panoptes/` | |
 
 ---
 
@@ -582,7 +604,7 @@ The dashboard checks from inside the browser, and by default the suite points
 Chromium (policy profile) and Firefox (`user.js`) at AdGuard's **public** DoH
 resolver, not at your account's device URL, so the check never sees your
 device ID even though every other app on the Mac resolves through it. Put
-your account resolver in `~/.config/macos-securenetwork-suite/dns.conf`:
+your account resolver in `~/.config/panoptes/dns.conf`:
 
 ```sh
 DOH_URL=https://d.adguard-dns.com/dns-query/<device-id>
@@ -762,7 +784,7 @@ gain, or what a hostile network could do, before the fix.
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
-| 1 | **High** | **DNS sudoers rule was a wildcard.** `networksetup -setdnsservers *` let any process running as you point system DNS at any server, on any service, silently and without a password — in a suite whose first purpose is DNS integrity. | Rule pinned to the two managed services and the two exact server lists the menu sets, rendered from `dns.conf` at install. CI rejects any wildcard. (`components/sudoers/securenet-dns.in`, `install.sh`) |
+| 1 | **High** | **DNS sudoers rule was a wildcard.** `networksetup -setdnsservers *` let any process running as you point system DNS at any server, on any service, silently and without a password — in a suite whose first purpose is DNS integrity. | Rule pinned to the two managed services and the two exact server lists the menu sets, rendered from `dns.conf` at install. CI rejects any wildcard. (`components/sudoers/panoptes-dns.in`, `install.sh`) |
 | 2 | **High** | **Passwordless root helper lived in `/usr/local/bin`** whenever that directory happened to be root-owned at install time. An Intel Homebrew installed or migrated later chowns `/usr/local/bin` to the user; the NOPASSWD rule would then name a file in a directory the user could replace — root for the asking. | Helper always installed in Apple's root-only `/Library/PrivilegedHelperTools`; installer refuses if that chain is not root-only; `status` re-checks its own path; `/usr/local/bin` holds only a link that nothing privileged references. The installer also stops chowning `/usr/local`. (`components/warp-killswitch/install.sh`) |
 | 3 | **High** | **Root wrote into the user's home.** The kill-switch installer, running as root, copied the menu plugin and moved backups under `~/Library` and `~/Documents`. A symlink planted at one of those paths by anything running as the user would be followed and its target overwritten as root. | Every write into the owner's home runs as the owner (`sudo -u`), including the uninstaller's restore. |
 | 4 | Medium | **AppleScript injection through the Wi-Fi name.** netwatch built notifications as `display notification "$body"` with only `"` escaped (not `\`), and the body carries the SSID — chosen by whoever runs the access point. A crafted name could close the string and run AppleScript as the user. | All osascript calls in netwatch, the menu, the root helper and probesource pass text as arguments (`on run argv`). CI greps for the old pattern. |
@@ -811,7 +833,7 @@ The repository was also checked for anything a published CVE could attach to.
   which carries the fixes for CVE-2025-32462 and CVE-2025-32463; the suite's
   rules use neither the `host` nor the `chroot` features those concerned.
 
-**Declaration: as of 2026-10-24, macOS-SecureNetwork-Suite 4.1.0 ships no code
+**Declaration: as of 2026-10-24, Panoptes-macOS (then macOS-SecureNetwork-Suite) 4.1.0 ships no code
 with a known CVE, and no CVE is known against the suite itself.** Two things are
 noted rather than fixed: Homebrew is bootstrapped with its own `curl | bash`
 installer at `HEAD`, and probesource builds five tools without a package

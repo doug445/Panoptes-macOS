@@ -73,7 +73,7 @@ It is crash-looping, not repeating: launchd `KeepAlive` restarts it on
 
 ## The menu's AdGuard DNS Enable / Disable items stopped working after I edited dns.conf
 
-Since 4.1 the passwordless rule in `/etc/sudoers.d/securenet-dns` names the
+Since 4.1 the passwordless rule in `/etc/sudoers.d/panoptes-dns` names the
 exact server lists the menu sets, rendered from `dns.conf` when the `sudoers`
 component runs. Change `FALLBACK1`/`FALLBACK2` and the menu's `sudo -n` call no
 longer matches, so it fails silently (the icon just does not change). Re-render
@@ -127,7 +127,7 @@ The dashboard's check runs in the browser. Chromium (policy profile) and
 Firefox (`user.js`) use the suite's `DOH_URL`, which defaults to AdGuard's
 public resolver, so your device ID never appears even though the system
 resolver (the account profile) is fine. Set `DOH_URL` and `DOH_BOOTSTRAP` in
-`~/.config/macos-securenetwork-suite/dns.conf` to the account resolver, run
+`~/.config/panoptes/dns.conf` to the account resolver, run
 `./install.sh --only profiles,firefox`, re-approve the Chromium profile and
 restart Firefox. See the FAQ in the README.
 
@@ -152,4 +152,4 @@ restart Firefox. See the FAQ in the README.
   root patches, use the hardware address.
 - **Everything compiles on Intel Homebrew.** Homebrew stopped building x86_64
   bottles in September 2026. Install MacPorts (or let the installer do it with
-  `SECURENET_PKG=macports ./install.sh`) to get prebuilt packages.
+  `PANOPTES_PKG=macports ./install.sh`) to get prebuilt packages.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
 # install.sh (macOS) — install the probesource probe driver onto this Mac and
@@ -23,7 +23,7 @@
 # Package manager (lib/pkg.sh): Apple Silicon always uses Homebrew under
 # /opt/homebrew, run as the normal user — never as root. Intel and OpenCore
 # Legacy Patcher Macs use MacPorts (/opt/local, installs via sudo) exclusively —
-# any installed Homebrew is ignored (the two coexist). SECURENET_PKG=homebrew
+# any installed Homebrew is ignored (the two coexist). PANOPTES_PKG=homebrew
 # forces the deprecated Homebrew-Intel path (it warns); the chosen manager can
 # be bootstrapped if missing.
 #
@@ -447,7 +447,7 @@ pipx_bin() {
 install_deps() {
     if [[ -z "$PKG_LIB" ]]; then
         echo
-        echo "Cannot install dependencies: lib/pkg.sh from macOS-SecureNetwork-Suite"
+        echo "Cannot install dependencies: lib/pkg.sh from Panoptes-macOS"
         echo "was not found next to this installer. Run it from the suite checkout."
         return 1
     fi

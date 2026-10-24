@@ -1,4 +1,4 @@
-# macOS-SecureNetwork-Suite — https://github.com/doug445/macOS-SecureNetwork-Suite
+# Panoptes-macOS — https://github.com/doug445/Panoptes-macOS
 # Copyright (c) 2026 William MacKinnon <spilled-bowline0j@icloud.com>
 # SPDX-License-Identifier: MIT
 # ══ DNS / Privacy Stack ═══════════════════════════════════════════════════════
@@ -194,7 +194,7 @@ checkdns() {
         command -v "$c" &>/dev/null || continue
         "$c" -V 2>/dev/null | grep -q '^Features:.* ECH' && { ech_curl=$(command -v "$c"); break; }
     done
-    doh=$( [[ -f ~/.config/macos-securenetwork-suite/dns.conf ]] && . ~/.config/macos-securenetwork-suite/dns.conf 2>/dev/null
+    doh=$( [[ -f ~/.config/panoptes/dns.conf ]] && . ~/.config/panoptes/dns.conf 2>/dev/null
            print -r -- "${DOH_URL:-https://dns.adguard-dns.com/dns-query}" )
     if [[ -z "$ech_curl" ]]; then
         _info "No ECH-capable curl found (stock curl has no ECH; needs one built against an ECH OpenSSL)"

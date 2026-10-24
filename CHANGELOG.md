@@ -1,7 +1,46 @@
 # Changelog
 
-All notable changes to macOS-SecureNetwork-Suite are recorded here.
+All notable changes to Panoptes-macOS (macOS-SecureNetwork-Suite until 4.1) are recorded here.
 This project follows [Semantic Versioning](https://semver.org/).
+
+## [4.2.0] — 2026-10-24 — renamed Panoptes-macOS
+
+The suite is now **Panoptes-macOS — macOS Secure Network**, the macOS
+counterpart of [Panoptes](https://github.com/doug445/Panoptes) for Linux, and
+wears the same mark. The old name, macOS-SecureNetwork-Suite, was generic.
+GitHub redirects the old repository address and git remotes. This is the first
+release under the new name and the first after the 4.1 **full security audit**
+by **Claude Fable 5.1, Anthropic's most capable model**, the maintainer's
+assistant on this single-maintainer project. Fable made the rename under the
+audit's rules: nothing the audit fixed is touched, every renamed path is
+migrated by the installer, every legacy name is still recognised, CI is green.
+
+### Changed
+- Repository: `doug445/macOS-SecureNetwork-Suite` → `doug445/Panoptes-macOS`.
+  The old address redirects; run
+  `git remote set-url origin https://github.com/doug445/Panoptes-macOS.git`
+  to stop depending on that. The guides moved to
+  `https://doug445.github.io/Panoptes-macOS/`; the old Pages address does not
+  redirect.
+- Per-user directories: `~/.config/macos-securenetwork-suite` →
+  `~/.config/panoptes` and `~/.local/state/macos-securenetwork-suite` →
+  `~/.local/state/panoptes`. The installer moves an existing directory once,
+  with its `dns.conf`, rendered profiles and state markers.
+- sudoers files: `/etc/sudoers.d/securenet-dns` and `securenet-netcheck` →
+  `panoptes-dns` and `panoptes-netcheck`, same pinned rules. The `sudoers`
+  component removes the old files after installing the new ones.
+- The marked blocks in `~/.zshrc` and Firefox `user.js` carry the new name;
+  the installer renames existing blocks in place (`.zshrc` backup kept).
+- Environment overrides: `PANOPTES_PKG` and `PANOPTES_PROTON_ID` replace
+  `SECURENET_PKG` and `SECURENET_PROTON_ID`; the old names are still honoured.
+- xbar plugin 3.3 (new state directory).
+
+### Added
+- `docs/brand/panoptes-macos-logo-dark.svg`: the Panoptes mark with the
+  tagline "macOS Secure Network" set in Monaco Bold, at the top of the README,
+  and a README note on Argus Panoptes, the hundred-eyed watchman the suite is
+  named for.
+- `uninstall.sh` removes both the current and the pre-4.2 names.
 
 ## [4.1.0] — 2026-10-24 — full security audit release
 

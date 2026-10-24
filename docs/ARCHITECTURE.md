@@ -37,7 +37,7 @@ arguments. Everything else (netwatch, nettop, netcheck, probesource, the menu
 plugin, the ARP-cache agent) runs as you.
 
 What can cross from you to root without a password is written down in
-`/etc/sudoers.d/{securenet-dns,securenet-netcheck,warp-killswitch}` and is
+`/etc/sudoers.d/{panoptes-dns,panoptes-netcheck,warp-killswitch}` and is
 **pinned to exact argument lists** — the DNS rule to the two server lists on the
 two managed services, the helper rule to `down`, `down --keep-dns`, `up`,
 `heal manual`, `status`, `state`, `verify`. No wildcards. Both the helper and the
@@ -89,7 +89,7 @@ takes the network, a merely-disconnected WARP daemon wedges with its lockdown
 menu's ProtonVPN *Connect* first **parks** WARP — `warp-killswitch down
 --keep-dns`: daemon stopped and disabled, DNS untouched, `killed` marker set so
 the watchdog stands by — and records that it did so in
-`~/.local/state/macos-securenetwork-suite/warp-parked-for-protonvpn`. *Disconnect*
+`~/.local/state/panoptes/warp-parked-for-protonvpn`. *Disconnect*
 clears the marker and runs `warp-killswitch up`. A deliberate *Tear Down* removes
 the marker, so the menu can tell "parked for ProtonVPN" (⏸️) from "killed" (💀).
 
