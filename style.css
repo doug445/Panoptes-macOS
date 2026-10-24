@@ -178,3 +178,5 @@ footer p { margin: 0 0 .5rem; }
 .tool { border: 1px solid var(--accent); border-radius: 12px; padding: 1rem 1.2rem; margin: 2rem 0; background: var(--surface); }
 .tool p:last-child { margin-bottom: 0; }
 small { color: var(--muted); }
+
+.hero .logo img { max-width: 100%; height: auto; }

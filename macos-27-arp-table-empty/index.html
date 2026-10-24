@@ -5,17 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>macOS 27: arp -an Empty and netstat Shows Nothing</title>
 <meta name="description" content="On macOS 27, scripts run by Homebrew bash see an empty ARP table and no sockets. How to check if you are affected, what fails, and lsof instead of netstat.">
-<link rel="canonical" href="https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/">
+<link rel="canonical" href="https://doug445.github.io/Panoptes-macOS/macos-27-arp-table-empty/">
 <meta name="author" content="William MacKinnon">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="../style.css">
 <meta property="og:type" content="article">
-<meta property="og:site_name" content="macOS SecureNetwork Suite">
+<meta property="og:site_name" content="Panoptes-macOS">
 <meta property="og:title" content="macOS 27: arp -an Empty and netstat Shows Nothing">
 <meta property="og:description" content="On macOS 27, scripts run by Homebrew bash see an empty ARP table and no sockets. How to check if you are affected, what fails, and lsof instead of netstat.">
-<meta property="og:url" content="https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/">
-<meta property="og:image" content="https://doug445.github.io/macOS-SecureNetwork-Suite/card.png">
+<meta property="og:url" content="https://doug445.github.io/Panoptes-macOS/macos-27-arp-table-empty/">
+<meta property="og:image" content="https://doug445.github.io/Panoptes-macOS/card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="article:published_time" content="2026-10-14">
@@ -31,16 +31,16 @@
       "description": "On macOS 27, scripts run by Homebrew bash see an empty ARP table and no sockets. How to check if you are affected, what fails, and lsof instead of netstat.",
       "datePublished": "2026-10-14",
       "dateModified": "2026-10-14",
-      "image": "https://doug445.github.io/macOS-SecureNetwork-Suite/card.png",
+      "image": "https://doug445.github.io/Panoptes-macOS/card.png",
       "author": { "@type": "Person", "name": "William MacKinnon", "url": "https://github.com/doug445" },
-      "mainEntityOfPage": "https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/",
-      "about": { "@type": "SoftwareApplication", "name": "macOS-SecureNetwork-Suite", "url": "https://doug445.github.io/macOS-SecureNetwork-Suite/", "applicationCategory": "SecurityApplication", "operatingSystem": "macOS" }
+      "mainEntityOfPage": "https://doug445.github.io/Panoptes-macOS/macos-27-arp-table-empty/",
+      "about": { "@type": "SoftwareApplication", "name": "Panoptes-macOS", "url": "https://doug445.github.io/Panoptes-macOS/", "applicationCategory": "SecurityApplication", "operatingSystem": "macOS" }
     },
     {
       "@type": "BreadcrumbList",
       "itemListElement": [
-        { "@type": "ListItem", "position": 1, "name": "macOS SecureNetwork Suite", "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/" },
-        { "@type": "ListItem", "position": 2, "name": "macOS 27 ARP", "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/macos-27-arp-table-empty/" }
+        { "@type": "ListItem", "position": 1, "name": "Panoptes-macOS", "item": "https://doug445.github.io/Panoptes-macOS/" },
+        { "@type": "ListItem", "position": 2, "name": "macOS 27 ARP", "item": "https://doug445.github.io/Panoptes-macOS/macos-27-arp-table-empty/" }
       ]
     },
     {
@@ -62,17 +62,17 @@
 
 <nav class="sitenav" aria-label="Site">
   <div class="wrap">
-    <a class="brand" href="../">macOS SecureNetwork Suite</a>
+    <a class="brand" href="../">Panoptes-macOS</a>
     <a href="../cloudflare-warp-connected-no-internet-mac/">WARP: no internet</a>
     <a href="../chrome-ech-not-working-macos/">Chrome ECH</a>
     <a href="../macos-27-arp-table-empty/">macOS 27 ARP</a>
     <a href="../homebrew-intel-mac-macports/">MacPorts on Intel</a>
-    <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">GitHub</a>
+    <a href="https://github.com/doug445/Panoptes-macOS">GitHub</a>
   </div>
 </nav>
 
 <main class="wrap">
-<p class="crumbs"><a href="../">macOS SecureNetwork Suite</a> › macOS 27 ARP</p>
+<p class="crumbs"><a href="../">Panoptes-macOS</a> › macOS 27 ARP</p>
 <h1>macOS 27: arp -an is empty and netstat shows nothing</h1>
 <p class="lede">Since upgrading to macOS 27, <code>arp -an</code> prints nothing in your scripts, <code>netstat -an</code> lists no connections, and tools that worked before return empty output without an error. Your network is fine. This page explains what is being hidden and from whom, how to confirm it on your Mac, what does not fix it, and how to get the data anyway.</p>
 
@@ -147,7 +147,7 @@
 <div class="codeblock"><pre><code>launchctl print gui/$UID/&lt;label&gt;</code></pre></div>
 
 <h2 id="automated">A packaged version of this workaround</h2>
-<div class="tool"><p><strong>Automated:</strong> the <code>macos27-netfix</code> component of <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">macOS-SecureNetwork-Suite</a> packages the design above. Its <code>detect.sh</code> is read-only and measures whether a Homebrew- or MacPorts-rooted process sees an empty ARP table on your Mac (exit 0 affected, 1 not affected, 2 inconclusive); run <code>components/macos27-netfix/detect.sh</code> from <code>/bin/sh</code>, not from Homebrew's or MacPorts' bash. <code>install.sh</code> refuses to install unless that measurement says affected, then adds the <code>com.netwatch.arpcache</code> LaunchAgent and an <code>arp_table()</code> helper. It does not edit your scripts; it lists the ones that need patching. <code>verify.sh</code> checks that the agent is loaded, the cache is fresh and non-empty, and a restricted process can resolve the gateway MAC. The agent removes itself after three consecutive “not affected” verdicts, ten minutes apart, once a macOS or Homebrew update makes the ARP table readable again.</p></div>
+<div class="tool"><p><strong>Automated:</strong> the <code>macos27-netfix</code> component of <a href="https://github.com/doug445/Panoptes-macOS">Panoptes-macOS</a> packages the design above. Its <code>detect.sh</code> is read-only and measures whether a Homebrew- or MacPorts-rooted process sees an empty ARP table on your Mac (exit 0 affected, 1 not affected, 2 inconclusive); run <code>components/macos27-netfix/detect.sh</code> from <code>/bin/sh</code>, not from Homebrew's or MacPorts' bash. <code>install.sh</code> refuses to install unless that measurement says affected, then adds the <code>com.netwatch.arpcache</code> LaunchAgent and an <code>arp_table()</code> helper. It does not edit your scripts; it lists the ones that need patching. <code>verify.sh</code> checks that the agent is loaded, the cache is fresh and non-empty, and a restricted process can resolve the gateway MAC. The agent removes itself after three consecutive “not affected” verdicts, ten minutes apart, once a macOS or Homebrew update makes the ARP table readable again.</p></div>
 
 <h2 id="faq">FAQ</h2>
 <details><summary>Why is arp -an empty on macOS 27?</summary><p>On macOS 27, a process forked by a binary that Apple did not sign, such as Homebrew or MacPorts bash, reads an empty ARP table, and everything that process starts inherits the restriction. Run arp -an from Apple's zsh or /bin/bash in Terminal and the table is there. The root cause is not confirmed.</p></details>
@@ -161,10 +161,10 @@
 
 <footer>
   <div class="wrap">
-    <p><strong>macOS-SecureNetwork-Suite</strong> by William MacKinnon
+    <p><strong>Panoptes-macOS</strong> by William MacKinnon
       (<a href="https://github.com/doug445">doug445</a>) ·
-      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">Source on GitHub</a> ·
-      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite/issues">Issues</a></p>
+      <a href="https://github.com/doug445/Panoptes-macOS">Source on GitHub</a> ·
+      <a href="https://github.com/doug445/Panoptes-macOS/issues">Issues</a></p>
     <p>Independent project. Not affiliated with Apple, Cloudflare, Proton, AdGuard, Homebrew or MacPorts.</p>
     <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 14 October 2026.</p>
   </div>

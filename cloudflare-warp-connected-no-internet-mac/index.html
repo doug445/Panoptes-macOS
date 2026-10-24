@@ -5,17 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cloudflare WARP Connected but No Internet on Mac: Fix</title>
 <meta name="description" content="Cloudflare WARP can leave a Mac with Wi-Fi but no internet: its pf firewall stays up with a dead tunnel. How to confirm it and get back online by hand.">
-<link rel="canonical" href="https://doug445.github.io/macOS-SecureNetwork-Suite/cloudflare-warp-connected-no-internet-mac/">
+<link rel="canonical" href="https://doug445.github.io/Panoptes-macOS/cloudflare-warp-connected-no-internet-mac/">
 <meta name="author" content="William MacKinnon">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="../style.css">
 <meta property="og:type" content="article">
-<meta property="og:site_name" content="macOS SecureNetwork Suite">
+<meta property="og:site_name" content="Panoptes-macOS">
 <meta property="og:title" content="Cloudflare WARP Connected but No Internet on Mac: Fix">
 <meta property="og:description" content="Cloudflare WARP can leave a Mac with Wi-Fi but no internet: its pf firewall stays up with a dead tunnel. How to confirm it and get back online by hand.">
-<meta property="og:url" content="https://doug445.github.io/macOS-SecureNetwork-Suite/cloudflare-warp-connected-no-internet-mac/">
-<meta property="og:image" content="https://doug445.github.io/macOS-SecureNetwork-Suite/card.png">
+<meta property="og:url" content="https://doug445.github.io/Panoptes-macOS/cloudflare-warp-connected-no-internet-mac/">
+<meta property="og:image" content="https://doug445.github.io/Panoptes-macOS/card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="article:published_time" content="2026-10-14">
@@ -31,16 +31,16 @@
       "description": "Cloudflare WARP can leave a Mac with Wi-Fi but no internet: its pf firewall stays up with a dead tunnel. How to confirm it and get back online by hand.",
       "datePublished": "2026-10-14",
       "dateModified": "2026-10-14",
-      "image": "https://doug445.github.io/macOS-SecureNetwork-Suite/card.png",
+      "image": "https://doug445.github.io/Panoptes-macOS/card.png",
       "author": { "@type": "Person", "name": "William MacKinnon", "url": "https://github.com/doug445" },
-      "mainEntityOfPage": "https://doug445.github.io/macOS-SecureNetwork-Suite/cloudflare-warp-connected-no-internet-mac/",
-      "about": { "@type": "SoftwareApplication", "name": "macOS-SecureNetwork-Suite", "url": "https://doug445.github.io/macOS-SecureNetwork-Suite/", "applicationCategory": "SecurityApplication", "operatingSystem": "macOS" }
+      "mainEntityOfPage": "https://doug445.github.io/Panoptes-macOS/cloudflare-warp-connected-no-internet-mac/",
+      "about": { "@type": "SoftwareApplication", "name": "Panoptes-macOS", "url": "https://doug445.github.io/Panoptes-macOS/", "applicationCategory": "SecurityApplication", "operatingSystem": "macOS" }
     },
     {
       "@type": "BreadcrumbList",
       "itemListElement": [
-        { "@type": "ListItem", "position": 1, "name": "macOS SecureNetwork Suite", "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/" },
-        { "@type": "ListItem", "position": 2, "name": "WARP: no internet", "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/cloudflare-warp-connected-no-internet-mac/" }
+        { "@type": "ListItem", "position": 1, "name": "Panoptes-macOS", "item": "https://doug445.github.io/Panoptes-macOS/" },
+        { "@type": "ListItem", "position": 2, "name": "WARP: no internet", "item": "https://doug445.github.io/Panoptes-macOS/cloudflare-warp-connected-no-internet-mac/" }
       ]
     },
     {
@@ -61,17 +61,17 @@
 
 <nav class="sitenav" aria-label="Site">
   <div class="wrap">
-    <a class="brand" href="../">macOS SecureNetwork Suite</a>
+    <a class="brand" href="../">Panoptes-macOS</a>
     <a href="../cloudflare-warp-connected-no-internet-mac/">WARP: no internet</a>
     <a href="../chrome-ech-not-working-macos/">Chrome ECH</a>
     <a href="../macos-27-arp-table-empty/">macOS 27 ARP</a>
     <a href="../homebrew-intel-mac-macports/">MacPorts on Intel</a>
-    <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">GitHub</a>
+    <a href="https://github.com/doug445/Panoptes-macOS">GitHub</a>
   </div>
 </nav>
 
 <main class="wrap">
-<p class="crumbs"><a href="../">macOS SecureNetwork Suite</a> › WARP: no internet</p>
+<p class="crumbs"><a href="../">Panoptes-macOS</a> › WARP: no internet</p>
 <h1>Cloudflare WARP connected but no internet on a Mac</h1>
 <p class="lede">The Wi-Fi icon says you are connected, Cloudflare WARP is switched on (often stuck on <em>Connecting</em>), and nothing loads. This page explains why WARP can leave a Mac in that state, how to tell it apart from an ISP outage, and how to get back online by hand, including at a hotel login page and alongside ProtonVPN.</p>
 
@@ -175,7 +175,7 @@ curl -s https://www.cloudflare.com/cdn-cgi/trace | grep '^warp='   # warp=on</co
 <p>These commands restore the setup the author tested: a free consumer registration in tunnel-only mode over MASQUE. If you ran WARP in a different mode, change the <code>mode</code> line. Your DNS servers survive the update. Post-quantum shows <code>Disabled</code> while unregistered and returns to <code>Enabled (network policy)</code> by itself.</p>
 
 <h2 id="automated">If this keeps happening</h2>
-<div class="tool"><p><strong>Automated:</strong> <code>warp-killswitch</code>, part of <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">macOS-SecureNetwork-Suite</a>, runs the steps on this page and checks the result of each one. <code>sudo warp-killswitch down</code> is the full teardown (DNS goes to DHCP so a captive portal can intercept; <code>--keep-dns</code> leaves DNS alone). It then proves plain internet works and escalates until it does. <code>up</code> restores DNS exactly as it was, reconnects, waits for <em>Connected</em> and a raw-IP check, and rolls back to a clean disconnected state if the tunnel never comes. <code>heal</code> runs the disconnect-first decision procedure above on demand. A root LaunchDaemon watchdog probes raw IP every 10 seconds, runs <code>heal</code> after three failures with the link up, and reconnects after a wake from sleep. On a wedged daemon it took about 137 seconds end to end in testing, so allow three minutes. An xbar menu-bar item adds Tear Down, Rebuild, Heal now and Status, and stops WARP's daemon before connecting ProtonVPN. On its first test run on a Mac, 6 of 7 tests passed; the dead-tunnel test is still unverified, so <code>heal</code>'s captive-portal and reconnect-retry branches have not been tested.</p></div>
+<div class="tool"><p><strong>Automated:</strong> <code>warp-killswitch</code>, part of <a href="https://github.com/doug445/Panoptes-macOS">Panoptes-macOS</a>, runs the steps on this page and checks the result of each one. <code>sudo warp-killswitch down</code> is the full teardown (DNS goes to DHCP so a captive portal can intercept; <code>--keep-dns</code> leaves DNS alone). It then proves plain internet works and escalates until it does. <code>up</code> restores DNS exactly as it was, reconnects, waits for <em>Connected</em> and a raw-IP check, and rolls back to a clean disconnected state if the tunnel never comes. <code>heal</code> runs the disconnect-first decision procedure above on demand. A root LaunchDaemon watchdog probes raw IP every 10 seconds, runs <code>heal</code> after three failures with the link up, and reconnects after a wake from sleep. On a wedged daemon it took about 137 seconds end to end in testing, so allow three minutes. An xbar menu-bar item adds Tear Down, Rebuild, Heal now and Status, and stops WARP's daemon before connecting ProtonVPN. On its first test run on a Mac, 6 of 7 tests passed; the dead-tunnel test is still unverified, so <code>heal</code>'s captive-portal and reconnect-retry branches have not been tested.</p></div>
 
 <h2 id="faq">FAQ</h2>
 <details><summary>Why does my Mac have no internet after sleep when Cloudflare WARP is on?</summary><p>A stale tunnel after wake is the most common way WARP's tunnel dies on a Mac, and WARP's lockdown firewall (the pf anchor com.cloudflare.warp_svc) stays up while the tunnel is dead, so everything except your local network is blocked. Disconnect WARP first. If its firewall rules survive the disconnect, the daemon is wedged and has to be stopped and disabled before the rules can be cleared.</p></details>
@@ -188,10 +188,10 @@ curl -s https://www.cloudflare.com/cdn-cgi/trace | grep '^warp='   # warp=on</co
 
 <footer>
   <div class="wrap">
-    <p><strong>macOS-SecureNetwork-Suite</strong> by William MacKinnon
+    <p><strong>Panoptes-macOS</strong> by William MacKinnon
       (<a href="https://github.com/doug445">doug445</a>) ·
-      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">Source on GitHub</a> ·
-      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite/issues">Issues</a></p>
+      <a href="https://github.com/doug445/Panoptes-macOS">Source on GitHub</a> ·
+      <a href="https://github.com/doug445/Panoptes-macOS/issues">Issues</a></p>
     <p>Independent project. Not affiliated with Apple, Cloudflare, Proton, AdGuard, Homebrew or MacPorts.</p>
     <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 14 October 2026.</p>
   </div>

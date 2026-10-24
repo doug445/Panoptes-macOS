@@ -5,17 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chrome ECH not working on Mac? Fix managed secure DNS</title>
 <meta name="description" content="Chrome, Brave and Edge on macOS turn off their own secure DNS when a DNS profile is installed, so ECH never starts. Force DoH by policy and verify it works.">
-<link rel="canonical" href="https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/">
+<link rel="canonical" href="https://doug445.github.io/Panoptes-macOS/chrome-ech-not-working-macos/">
 <meta name="author" content="William MacKinnon">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="../style.css">
 <meta property="og:type" content="article">
-<meta property="og:site_name" content="macOS SecureNetwork Suite">
+<meta property="og:site_name" content="Panoptes-macOS">
 <meta property="og:title" content="Chrome ECH not working on Mac? Fix managed secure DNS">
 <meta property="og:description" content="Chrome, Brave and Edge on macOS turn off their own secure DNS when a DNS profile is installed, so ECH never starts. Force DoH by policy and verify it works.">
-<meta property="og:url" content="https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/">
-<meta property="og:image" content="https://doug445.github.io/macOS-SecureNetwork-Suite/card.png">
+<meta property="og:url" content="https://doug445.github.io/Panoptes-macOS/chrome-ech-not-working-macos/">
+<meta property="og:image" content="https://doug445.github.io/Panoptes-macOS/card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="article:published_time" content="2026-10-14">
@@ -31,17 +31,17 @@
       "description": "Chrome, Brave and Edge on macOS turn off their own secure DNS when a DNS profile is installed, so ECH never starts. Force DoH by policy and verify it works.",
       "datePublished": "2026-10-14",
       "dateModified": "2026-10-14",
-      "image": "https://doug445.github.io/macOS-SecureNetwork-Suite/card.png",
+      "image": "https://doug445.github.io/Panoptes-macOS/card.png",
       "author": {
         "@type": "Person",
         "name": "William MacKinnon",
         "url": "https://github.com/doug445"
       },
-      "mainEntityOfPage": "https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/",
+      "mainEntityOfPage": "https://doug445.github.io/Panoptes-macOS/chrome-ech-not-working-macos/",
       "about": {
         "@type": "SoftwareApplication",
-        "name": "macOS-SecureNetwork-Suite",
-        "url": "https://doug445.github.io/macOS-SecureNetwork-Suite/",
+        "name": "Panoptes-macOS",
+        "url": "https://doug445.github.io/Panoptes-macOS/",
         "applicationCategory": "SecurityApplication",
         "operatingSystem": "macOS"
       }
@@ -52,14 +52,14 @@
         {
           "@type": "ListItem",
           "position": 1,
-          "name": "macOS SecureNetwork Suite",
-          "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/"
+          "name": "Panoptes-macOS",
+          "item": "https://doug445.github.io/Panoptes-macOS/"
         },
         {
           "@type": "ListItem",
           "position": 2,
           "name": "Chrome ECH on macOS",
-          "item": "https://doug445.github.io/macOS-SecureNetwork-Suite/chrome-ech-not-working-macos/"
+          "item": "https://doug445.github.io/Panoptes-macOS/chrome-ech-not-working-macos/"
         }
       ]
     },
@@ -124,17 +124,17 @@
 
 <nav class="sitenav" aria-label="Site">
   <div class="wrap">
-    <a class="brand" href="../">macOS SecureNetwork Suite</a>
+    <a class="brand" href="../">Panoptes-macOS</a>
     <a href="../cloudflare-warp-connected-no-internet-mac/">WARP: no internet</a>
     <a href="../chrome-ech-not-working-macos/">Chrome ECH</a>
     <a href="../macos-27-arp-table-empty/">macOS 27 ARP</a>
     <a href="../homebrew-intel-mac-macports/">MacPorts on Intel</a>
-    <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">GitHub</a>
+    <a href="https://github.com/doug445/Panoptes-macOS">GitHub</a>
   </div>
 </nav>
 
 <main class="wrap">
-<p class="crumbs"><a href="../">macOS SecureNetwork Suite</a> › Chrome ECH on macOS</p>
+<p class="crumbs"><a href="../">Panoptes-macOS</a> › Chrome ECH on macOS</p>
 <h1>Chrome, Brave or Edge ECH not working on macOS: how to fix it</h1>
 <p class="lede">You turned on “Use secure DNS” in Chrome, Brave or Edge, but <a href="https://tls-ech.dev">tls-ech.dev</a> still says you are not using Encrypted Client Hello. On a Mac with a DNS configuration profile installed, the browser has quietly switched its own DNS-over-HTTPS off, so it never receives the key ECH needs. This page shows how to switch it back on with an enterprise policy, how to set up Firefox, what Safari can and cannot do, and how to check the result.</p>
 
@@ -320,7 +320,7 @@ user_pref("network.trr.bootstrapAddress", "94.140.14.14");</code></pre></div>
 <p>Stock <code>curl</code> cannot test ECH: macOS's own curl is built on LibreSSL, which has no ECH, and OpenSSL gained it only in 4.0.0 (April 2026). A curl built against an ECH-capable OpenSSL can, but it only gets ECH keys over DoH, because the macOS resolver does not return <code>HTTPS</code> records to it. Give it <code>--doh-url</code>, and run it with that build rather than the system <code>curl</code>:</p>
 <div class="codeblock"><pre><code>curl -v --doh-url https://dns.adguard-dns.com/dns-query --ech hard https://tls-ech.dev/</code></pre></div>
 
-<div class="tool"><p><strong>Automated:</strong> the <code>profiles</code> component of <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">macOS-SecureNetwork-Suite</a> builds the Chromium policy profile above for all five browsers, with your own DoH target, plus a system-wide AdGuard DNS-over-HTTPS profile (skipped if a device profile already provides encrypted DNS), and queues both for approval (<code>./install.sh --only profiles</code>). Its <code>firefox</code> component writes the Firefox preferences to every profile. <code>checkdns</code> then tests ECH at both layers: whether your resolver returns the <code>HTTPS</code> record for <code>crypto.cloudflare.com</code>, and, if it finds an ECH-capable curl, a real <code>--ech hard</code> handshake against tls-ech.dev with keys fetched over your DoH resolver. With only stock curl it says so rather than reporting a false failure.</p></div>
+<div class="tool"><p><strong>Automated:</strong> the <code>profiles</code> component of <a href="https://github.com/doug445/Panoptes-macOS">Panoptes-macOS</a> builds the Chromium policy profile above for all five browsers, with your own DoH target, plus a system-wide AdGuard DNS-over-HTTPS profile (skipped if a device profile already provides encrypted DNS), and queues both for approval (<code>./install.sh --only profiles</code>). Its <code>firefox</code> component writes the Firefox preferences to every profile. <code>checkdns</code> then tests ECH at both layers: whether your resolver returns the <code>HTTPS</code> record for <code>crypto.cloudflare.com</code>, and, if it finds an ECH-capable curl, a real <code>--ech hard</code> handshake against tls-ech.dev with keys fetched over your DoH resolver. With only stock curl it says so rather than reporting a false failure.</p></div>
 
 <h2 id="faq">FAQ</h2>
 <details><summary>Does Safari support ECH?</summary><p>No. WebKit has no implementation of Encrypted Client Hello as of Safari 26, and no setting changes that. Use Firefox or a Chromium browser for anything you want hidden from the network path.</p></details>
@@ -334,10 +334,10 @@ user_pref("network.trr.bootstrapAddress", "94.140.14.14");</code></pre></div>
 
 <footer>
   <div class="wrap">
-    <p><strong>macOS-SecureNetwork-Suite</strong> by William MacKinnon
+    <p><strong>Panoptes-macOS</strong> by William MacKinnon
       (<a href="https://github.com/doug445">doug445</a>) ·
-      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">Source on GitHub</a> ·
-      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite/issues">Issues</a></p>
+      <a href="https://github.com/doug445/Panoptes-macOS">Source on GitHub</a> ·
+      <a href="https://github.com/doug445/Panoptes-macOS/issues">Issues</a></p>
     <p>Independent project. Not affiliated with Apple, Cloudflare, Proton, AdGuard, Homebrew or MacPorts.</p>
     <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 14 October 2026.</p>
   </div>

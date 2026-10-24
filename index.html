@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>macOS SecureNetwork Suite: private DNS, WARP kill-switch</title>
+<title>Panoptes-macOS: private DNS, WARP kill-switch</title>
 <meta name="description" content="Free, open-source macOS network security: encrypted AdGuard DNS with ECH in every browser that can do it, a Cloudflare WARP kill-switch that self-heals, and ARP-spoofing and port-scan alerts.">
-<link rel="canonical" href="https://doug445.github.io/macOS-SecureNetwork-Suite/">
+<link rel="canonical" href="https://doug445.github.io/Panoptes-macOS/">
 <meta name="author" content="William MacKinnon">
 <meta name="robots" content="index, follow, max-image-preview:large">
 <meta name="color-scheme" content="light dark">
 <link rel="stylesheet" href="style.css">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="macOS SecureNetwork Suite">
-<meta property="og:title" content="macOS SecureNetwork Suite: private DNS, a WARP kill-switch and intrusion alerts">
+<meta property="og:site_name" content="Panoptes-macOS">
+<meta property="og:title" content="Panoptes-macOS: private DNS, a WARP kill-switch and intrusion alerts">
 <meta property="og:description" content="Encrypted, filtered DNS with ECH; a Cloudflare WARP kill-switch that never blackholes your Mac; ARP-spoofing, evil-twin and port-scan alerts. One installer, one menu-bar icon.">
-<meta property="og:url" content="https://doug445.github.io/macOS-SecureNetwork-Suite/">
-<meta property="og:image" content="https://doug445.github.io/macOS-SecureNetwork-Suite/card.png">
+<meta property="og:url" content="https://doug445.github.io/Panoptes-macOS/">
+<meta property="og:image" content="https://doug445.github.io/Panoptes-macOS/card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
@@ -25,17 +25,17 @@
   "@graph": [
     {
       "@type": "SoftwareApplication",
-      "@id": "https://doug445.github.io/macOS-SecureNetwork-Suite/#software",
-      "name": "macOS-SecureNetwork-Suite",
+      "@id": "https://doug445.github.io/Panoptes-macOS/#software",
+      "name": "Panoptes-macOS",
       "description": "Network security suite for macOS: encrypted, filtered DNS (AdGuard DoH with DNSSEC fallbacks), Encrypted Client Hello in every capable browser, a Cloudflare WARP tunnel with a verified kill-switch and self-healing watchdog, a menu-bar control for WARP, AdGuard DNS and ProtonVPN, monitors for port scans, ARP spoofing and evil-twin access points, and Objective-See's LuLu outbound firewall with BlockBlock and KnockKnock for persistence.",
       "applicationCategory": "SecurityApplication",
       "operatingSystem": "macOS 14–27 on Apple Silicon; macOS 11–26 on Intel (reduced)",
-      "softwareVersion": "4.0.0",
+      "softwareVersion": "4.2.0",
       "license": "https://opensource.org/licenses/MIT",
-      "url": "https://doug445.github.io/macOS-SecureNetwork-Suite/",
-      "downloadUrl": "https://github.com/doug445/macOS-SecureNetwork-Suite",
-      "codeRepository": "https://github.com/doug445/macOS-SecureNetwork-Suite",
-      "image": "https://doug445.github.io/macOS-SecureNetwork-Suite/menu-bar.jpg",
+      "url": "https://doug445.github.io/Panoptes-macOS/",
+      "downloadUrl": "https://github.com/doug445/Panoptes-macOS",
+      "codeRepository": "https://github.com/doug445/Panoptes-macOS",
+      "image": "https://doug445.github.io/Panoptes-macOS/menu-bar.jpg",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
       "author": { "@type": "Person", "name": "William MacKinnon", "url": "https://github.com/doug445" }
     },
@@ -56,17 +56,18 @@
 
 <nav class="sitenav" aria-label="Site">
   <div class="wrap">
-    <a class="brand" href="./">macOS SecureNetwork Suite</a>
+    <a class="brand" href="./">Panoptes-macOS</a>
     <a href="cloudflare-warp-connected-no-internet-mac/">WARP: no internet</a>
     <a href="chrome-ech-not-working-macos/">Chrome ECH</a>
     <a href="macos-27-arp-table-empty/">macOS 27 ARP</a>
     <a href="homebrew-intel-mac-macports/">MacPorts on Intel</a>
-    <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">GitHub</a>
+    <a href="https://github.com/doug445/Panoptes-macOS">GitHub</a>
   </div>
 </nav>
 
 <header class="hero">
   <div class="wrap">
+    <p class="logo"><img src="panoptes-macos-logo-dark.svg" alt="Panoptes-macOS — macOS Secure Network" width="480" height="144"></p>
     <p class="eyebrow">Apple Silicon macOS 14–27 · Intel macOS 11–26.x · MIT</p>
     <h1>Private DNS, a WARP kill-switch and intrusion alerts for your Mac</h1>
     <p class="lede">
@@ -76,7 +77,7 @@
       menu-bar icon</strong>, and nothing that pretends to work when it doesn't.
     </p>
     <div class="cta">
-      <a class="btn primary" href="https://github.com/doug445/macOS-SecureNetwork-Suite">Get it on GitHub</a>
+      <a class="btn primary" href="https://github.com/doug445/Panoptes-macOS">Get it on GitHub</a>
       <a class="btn" href="#install">Install</a>
       <a class="btn" href="#problems">Fix a specific problem</a>
     </div>
@@ -151,8 +152,8 @@
 </table></div>
 
 <h2 id="install">Install</h2>
-<div class="codeblock"><pre><code>git clone https://github.com/doug445/macOS-SecureNetwork-Suite.git
-cd macOS-SecureNetwork-Suite
+<div class="codeblock"><pre><code>git clone https://github.com/doug445/Panoptes-macOS.git
+cd Panoptes-macOS
 ./install.sh            # as your normal user; asks for sudo once</code></pre></div>
 <p>Then <code>checkdns</code>, <code>netcheck</code> and <code>sudo warp-killswitch status</code>.
   macOS never installs configuration profiles silently, so approve the two DoH profiles in
@@ -213,10 +214,10 @@ cd macOS-SecureNetwork-Suite
 
 <footer>
   <div class="wrap">
-    <p><strong>macOS-SecureNetwork-Suite</strong> by William MacKinnon
+    <p><strong>Panoptes-macOS</strong> by William MacKinnon
       (<a href="https://github.com/doug445">doug445</a>) ·
-      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite">Source on GitHub</a> ·
-      <a href="https://github.com/doug445/macOS-SecureNetwork-Suite/issues">Issues</a></p>
+      <a href="https://github.com/doug445/Panoptes-macOS">Source on GitHub</a> ·
+      <a href="https://github.com/doug445/Panoptes-macOS/issues">Issues</a></p>
     <p>Independent project. Not affiliated with Apple, Cloudflare, Proton, AdGuard, Objective-See, Homebrew or MacPorts.</p>
     <p>Copyright © 2026 William MacKinnon. Code under the MIT licence. Page last updated 23 October 2026.</p>
   </div>
